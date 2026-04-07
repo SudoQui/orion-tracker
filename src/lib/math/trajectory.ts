@@ -4,7 +4,7 @@ import type {
   MissionTimelineEvent,
   TrajectoryPoint,
   Vector3,
-} from ""
+} from "@/types/trajectory"
 
 function magnitude(vector: Vector3): number {
   return Math.sqrt(vector.x ** 2 + vector.y ** 2 + vector.z ** 2)
