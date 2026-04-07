@@ -1,0 +1,64 @@
+{
+  "missionName": "Artemis II Mission Dashboard",
+  "vehicleName": "Orion Crew Vehicle",
+  "launchTime": "2026-04-01T05:00:00Z",
+  "plannedEndTime": "2026-04-11T05:00:00Z",
+  "earthRadiusKm": 6371,
+  "moonRadiusKm": 1737.4,
+  "moonReferencePosition": {
+    "x": 384400,
+    "y": 0,
+    "z": 0
+  },
+  "timeline": [
+    {
+      "id": "launch",
+      "label": "Launch",
+      "phase": "Launch",
+      "timestamp": "2026-04-01T05:00:00Z",
+      "description": "Artemis II lifts off and begins its journey from Earth."
+    },
+    {
+      "id": "earth-orbit-checkout",
+      "label": "Earth Orbit Checkout",
+      "phase": "Earth Orbit Checkout",
+      "timestamp": "2026-04-01T06:00:00Z",
+      "description": "Initial spacecraft checks and early orbital operations."
+    },
+    {
+      "id": "tli",
+      "label": "Translunar Injection",
+      "phase": "Translunar Injection",
+      "timestamp": "2026-04-01T09:00:00Z",
+      "description": "Orion departs Earth orbit and heads toward the Moon."
+    },
+    {
+      "id": "outbound-coast",
+      "label": "Outbound Coast",
+      "phase": "Outbound Coast",
+      "timestamp": "2026-04-02T00:00:00Z",
+      "description": "The spacecraft is coasting along the outbound leg."
+    },
+    {
+      "id": "lunar-flyby",
+      "label": "Lunar Flyby",
+      "phase": "Lunar Flyby",
+      "timestamp": "2026-04-05T05:00:00Z",
+      "description": "Closest approach to the Moon and path turn for return."
+    },
+    {
+      "id": "inbound-coast",
+      "label": "Inbound Coast",
+      "phase": "Inbound Coast",
+      "timestamp": "2026-04-06T00:00:00Z",
+      "description": "Orion begins the return leg back toward Earth."
+    },
+    {
+      "id": "reentry",
+      "label": "Reentry",
+      "phase": "Reentry",
+      "timestamp": "2026-04-11T05:00:00Z",
+      "description": "The mission ends with Earth reentry and splashdown."
+    }
+  ]
+}
