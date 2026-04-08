@@ -20,6 +20,7 @@ const VIEWBOX_WIDTH = 1600
 const VIEWBOX_HEIGHT = 900
 const PADDING = 110
 const ZOOM_FACTOR = 1.12
+const PLANET_SCALE = 1.3
 
 function rotateClockwise90(point: Vector3): Vector3 {
   return {
@@ -77,6 +78,59 @@ function pathFromTrajectory(
     .join(" ")
 }
 
+function getTrajectoryProgressPoint(
+  points: TrajectoryPoint[],
+  project: (point: Vector3) => Point2D,
+  progress: number
+): Point2D | null {
+  if (points.length === 0) return null
+
+  const projectedPoints = points.map((point) =>
+    project(rotateClockwise90(point.position))
+  )
+
+  if (projectedPoints.length === 1) return projectedPoints[0]
+
+  const clampedProgress = Math.min(Math.max(progress, 0), 1)
+  const segmentLengths: number[] = []
+  let totalLength = 0
+
+  for (let index = 0; index < projectedPoints.length - 1; index += 1) {
+    const start = projectedPoints[index]
+    const end = projectedPoints[index + 1]
+    const segmentLength = Math.hypot(end.x - start.x, end.y - start.y)
+    segmentLengths.push(segmentLength)
+    totalLength += segmentLength
+  }
+
+  if (totalLength === 0) return projectedPoints[0]
+
+  const targetDistance = totalLength * clampedProgress
+  let traversedDistance = 0
+
+  for (let index = 0; index < segmentLengths.length; index += 1) {
+    const segmentLength = segmentLengths[index]
+
+    if (traversedDistance + segmentLength >= targetDistance) {
+      const start = projectedPoints[index]
+      const end = projectedPoints[index + 1]
+      const segmentProgress =
+        segmentLength === 0
+          ? 0
+          : (targetDistance - traversedDistance) / segmentLength
+
+      return {
+        x: start.x + (end.x - start.x) * segmentProgress,
+        y: start.y + (end.y - start.y) * segmentProgress,
+      }
+    }
+
+    traversedDistance += segmentLength
+  }
+
+  return projectedPoints[projectedPoints.length - 1]
+}
+
 export default function OrbitView({
   actualTrajectory,
   futureTrajectory,
@@ -113,6 +167,24 @@ export default function OrbitView({
   const currentPoint = project(
     rotateClockwise90(actualTrajectory[actualTrajectory.length - 1].position)
   )
+  const halfOrbitPoint = getTrajectoryProgressPoint(actualTrajectory, project, 0.5)
+  const midpointMoonSize = 100
+  // Manual adjustment knobs for the midpoint moon marker position.
+  const midpointMoonOffsetX = -550
+  const midpointMoonOffsetY = -150
+  const earthSize = 184 * PLANET_SCALE
+  const moonSize = 124 * PLANET_SCALE
+  const flybyMoonSize = 108 * PLANET_SCALE
+  const moonOrbitRadius =
+    (Math.hypot(moonPoint.x - earthPoint.x, moonPoint.y - earthPoint.y) +
+      Math.hypot(
+        flybyMoonPoint.x - earthPoint.x,
+        flybyMoonPoint.y - earthPoint.y
+      )) /
+    2
+  const legendScale = 1
+  const legendX = 36
+  const legendY = (VIEWBOX_HEIGHT - 215 * legendScale) / 2
 
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/80 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
@@ -120,7 +192,6 @@ export default function OrbitView({
         <div>
           <h2 className="text-xl font-semibold text-white">Mission map</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Rotated for a wider layout, with Moon positions shown consistently through time
           </p>
         </div>
 
@@ -129,10 +200,10 @@ export default function OrbitView({
         </div>
       </div>
 
-      <div className="p-4">
+      <div className="p-2">
         <svg
           viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-          className="h-[760px] w-full rounded-2xl bg-[#030712]"
+          className="block h-auto w-full rounded-2xl bg-[#030712]"
         >
           <defs>
             <pattern id="smallGrid" width="60" height="60" patternUnits="userSpaceOnUse">
@@ -177,6 +248,15 @@ export default function OrbitView({
           <rect width="100%" height="100%" fill="#020617" />
           <rect width="100%" height="100%" fill="url(#stars)" />
           <rect width="100%" height="100%" fill="url(#largeGrid)" />
+          <circle
+            cx={earthPoint.x}
+            cy={earthPoint.y}
+            r={moonOrbitRadius}
+            fill="none"
+            stroke="rgba(148,163,184,0.42)"
+            strokeWidth="2.6"
+            strokeDasharray="12 10"
+          />
 
           <path
             d={moonActualSvgPath}
@@ -213,30 +293,42 @@ export default function OrbitView({
             opacity="0.95"
           />
 
+          {halfOrbitPoint ? (
+            <image
+              href="/images/moon.svg"
+              x={halfOrbitPoint.x + midpointMoonOffsetX}
+              y={halfOrbitPoint.y + midpointMoonOffsetY}
+              width={midpointMoonSize}
+              height={midpointMoonSize}
+              preserveAspectRatio="xMidYMid meet"
+              opacity="0.5"
+            />
+          ) : null}
+
           <image
             href="/images/earth.svg"
-            x={earthPoint.x - 92}
-            y={earthPoint.y - 92}
-            width="184"
-            height="184"
+            x={earthPoint.x - earthSize / 2}
+            y={earthPoint.y - earthSize / 2}
+            width={earthSize}
+            height={earthSize}
             preserveAspectRatio="xMidYMid meet"
           />
 
           <image
             href="/images/moon.svg"
-            x={moonPoint.x - 62}
-            y={moonPoint.y - 62}
-            width="124"
-            height="124"
+            x={moonPoint.x - moonSize / 2}
+            y={moonPoint.y - moonSize / 2}
+            width={moonSize}
+            height={moonSize}
             preserveAspectRatio="xMidYMid meet"
           />
 
           <image
             href="/images/moon.svg"
-            x={flybyMoonPoint.x - 54}
-            y={flybyMoonPoint.y - 54}
-            width="108"
-            height="108"
+            x={flybyMoonPoint.x - flybyMoonSize / 2}
+            y={flybyMoonPoint.y - flybyMoonSize / 2}
+            width={flybyMoonSize}
+            height={flybyMoonSize}
             preserveAspectRatio="xMidYMid meet"
             opacity="0.38"
           />
@@ -245,19 +337,12 @@ export default function OrbitView({
             href="/images/orion.svg"
             x={currentPoint.x - 34}
             y={currentPoint.y - 34}
-            width="68"
-            height="68"
+            width="118"
+            height="118"
             preserveAspectRatio="xMidYMid meet"
           />
 
-          <circle
-            cx={flybyMoonPoint.x}
-            cy={flybyMoonPoint.y}
-            r="10"
-            fill="rgba(229,231,235,0.08)"
-            stroke="rgba(250,204,21,0.95)"
-            strokeWidth="3"
-          />
+          
 
           <text
             x={flybyMoonPoint.x + 16}
@@ -267,7 +352,6 @@ export default function OrbitView({
             fontFamily="sans-serif"
             fontWeight="700"
           >
-            Moon at closest approach
           </text>
 
           <text
@@ -303,7 +387,7 @@ export default function OrbitView({
             ORION
           </text>
 
-          <g transform="translate(1010, 28)">
+          <g transform={`translate(${legendX}, ${legendY}) scale(${legendScale})`}>
             <rect
               width="520"
               height="215"

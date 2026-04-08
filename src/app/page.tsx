@@ -11,8 +11,8 @@ import MissionTimeline from "@/components/timeline/MissionTimeline"
 import { formatTimestamp } from "@/lib/formatting/format"
 import type { DashboardData, SourceMetadata } from "@/types/mission"
 
-const LINKEDIN_URL = "https://www.linkedin.com/in/your-linkedin"
-const GITHUB_URL = "https://github.com/your-username/orion-tracker"
+const LINKEDIN_URL = "https://www.linkedin.com/in/mustafa-siddiqui-32ab73161/"
+const GITHUB_URL = "https://github.com/SudoQui/orion-tracker"
 
 function buildFallbackSourceMetadata(data: DashboardData | null): SourceMetadata {
   const fallbackTimestamp =
