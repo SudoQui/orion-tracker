@@ -9,10 +9,31 @@ import OrbitView from "@/components/orbit/OrbitView"
 import OfficialDataPanel from "@/components/panels/OfficialDataPanel"
 import MissionTimeline from "@/components/timeline/MissionTimeline"
 import { formatTimestamp } from "@/lib/formatting/format"
-import type { DashboardData } from "@/types/mission"
+import type { DashboardData, SourceMetadata } from "@/types/mission"
 
-const LINKEDIN_URL = "https://www.linkedin.com/in/mustafa-siddiqui-32ab73161/"
-const GITHUB_URL = "https://github.com/SudoQui/orion-tracker"
+const LINKEDIN_URL = "https://www.linkedin.com/in/your-linkedin"
+const GITHUB_URL = "https://github.com/your-username/orion-tracker"
+
+function buildFallbackSourceMetadata(data: DashboardData | null): SourceMetadata {
+  const fallbackTimestamp =
+    data?.currentActualPoint?.timestamp ??
+    data?.lastUpdated ??
+    new Date().toISOString()
+
+  return {
+    trajectorySourceLabel: "NASA Artemis Real-Time Orbit Website ephemeris",
+    trajectorySourceUrl:
+      "https://www.nasa.gov/missions/artemis/artemis-2/track-nasas-artemis-ii-mission-in-real-time/",
+    ephemerisZipUrl: "",
+    moonSourceLabel: "JPL Horizons Moon vectors",
+    moonSourceUrl: "https://ssd.jpl.nasa.gov/api/horizons.api",
+    referenceFrame: "ICRF",
+    centerName: "Earth",
+    timeSystem: "UT",
+    officialSampleCount: data?.actualPath?.length ?? 0,
+    officialEphemerisEndTime: fallbackTimestamp,
+  }
+}
 
 export default function HomePage() {
   const [data, setData] = useState<DashboardData | null>(null)
@@ -57,12 +78,14 @@ export default function HomePage() {
     }
   }, [])
 
-  if (!data && !error) {
+  if (!data) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
         <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
           <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-cyan-400/20 border-t-cyan-300" />
-          <p className="mt-4 text-lg font-medium">Booting OrionTracker accuracy mode...</p>
+          <p className="mt-4 text-lg font-medium">
+            Booting OrionTracker accuracy mode...
+          </p>
           <p className="mt-2 text-sm text-slate-400">
             Pulling official NASA and JPL vectors
           </p>
@@ -71,23 +94,7 @@ export default function HomePage() {
     )
   }
 
-  if (!data && error) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-        <div className="max-w-xl rounded-3xl border border-amber-400/30 bg-amber-400/10 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
-          <p className="text-lg font-semibold text-amber-200">Dashboard data unavailable</p>
-          <p className="mt-3 text-sm leading-6 text-amber-100/90">{error}</p>
-          <p className="mt-3 text-xs text-amber-100/70">
-            OrionTracker will keep retrying automatically every 5 seconds.
-          </p>
-        </div>
-      </main>
-    )
-  }
-
-  if (!data) {
-    return null
-  }
+  const safeSourceMetadata = data.sourceMetadata ?? buildFallbackSourceMetadata(data)
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -120,17 +127,20 @@ export default function HomePage() {
             <OrbitView
               actualTrajectory={data.actualPath}
               futureTrajectory={data.futurePath}
+              moonActualPath={data.moonActualPath}
+              moonFuturePath={data.moonFuturePath}
               currentMoonPosition={data.currentMoonPoint}
+              flownClosestApproachMoonPosition={data.flownClosestApproachMoonPoint}
               currentTimestamp={data.currentActualPoint.timestamp}
             />
 
             <SectionCard
               title="Official data status"
-              subtitle="Source provenance and future outlook from official vectors"
+              subtitle="Source provenance and time-consistent interpretation"
             >
               <OfficialDataPanel
-                sourceMetadata={data.sourceMetadata}
-                nextClosestApproachToMoon={data.nextClosestApproachToMoon}
+                sourceMetadata={safeSourceMetadata}
+                flownClosestApproachToMoon={data.flownClosestApproachToMoon}
                 futureSampleCount={data.futurePath.length}
               />
             </SectionCard>

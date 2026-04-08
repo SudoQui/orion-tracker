@@ -44,14 +44,6 @@ async function getMissionConfig(): Promise<MissionConfig> {
   return readJsonFile<MissionConfig>(path.join("data", "mission-config.json"))
 }
 
-async function getNominalTrajectory(): Promise<TrajectoryPoint[]> {
-  return readJsonFile<TrajectoryPoint[]>(path.join("data", "nominal-trajectory.json"))
-}
-
-async function getBundledActualTrajectory(): Promise<TrajectoryPoint[]> {
-  return readJsonFile<TrajectoryPoint[]>(path.join("data", "actual-trajectory.json"))
-}
-
 function normalizeTimestamp(raw: string): string {
   return raw.endsWith("Z") ? raw : `${raw}Z`
 }
@@ -302,10 +294,7 @@ async function fetchMoonTrajectoryForRange(
   const points: TrajectoryPoint[] = []
 
   for (const line of lines) {
-    const values = line
-      .split(",")
-      .map((part) => part.trim())
-
+    const values = line.split(",").map((part) => part.trim())
     if (values.length < 8) continue
 
     const calendar = values[1]
@@ -335,37 +324,56 @@ async function fetchMoonTrajectoryForRange(
   )
 }
 
+function buildFallbackSourceMetadata(
+  pointCount = 0,
+  endTime = new Date().toISOString(),
+  ephemerisZipUrl = ""
+): SourceMetadata {
+  return {
+    trajectorySourceLabel: "NASA Artemis Real-Time Orbit Website ephemeris",
+    trajectorySourceUrl: NASA_TRACKING_ARTICLE_URL,
+    ephemerisZipUrl,
+    moonSourceLabel: "JPL Horizons Moon vectors",
+    moonSourceUrl: JPL_HORIZONS_API_URL,
+    referenceFrame: "ICRF",
+    centerName: "Earth",
+    timeSystem: "UT",
+    officialSampleCount: pointCount,
+    officialEphemerisEndTime: endTime,
+  }
+}
+
 function getValidatedSourceMetadata(parsed: ParsedEphemeris): SourceMetadata {
+  const fallback = buildFallbackSourceMetadata(
+    parsed.points.length,
+    parsed.points[parsed.points.length - 1]?.timestamp ?? new Date().toISOString(),
+    parsed.ephemerisZipUrl
+  )
+
   const centerName =
     parsed.metadata.CENTER_NAME ??
     parsed.metadata.CENTER ??
-    "Earth"
+    fallback.centerName
 
   const referenceFrame =
     parsed.metadata.REF_FRAME ??
     parsed.metadata.REF_SYSTEM ??
-    "ICRF"
+    fallback.referenceFrame
 
   const timeSystem =
-    (parsed.metadata.TIME_SYSTEM ?? "UT").toUpperCase()
-
-  if (!/EARTH|GEOCENTRIC|399/i.test(centerName)) {
-    throw new Error(
-      `Unsupported ephemeris center '${centerName}'. This build expects an Earth centered trajectory.`
-    )
-  }
+    (parsed.metadata.TIME_SYSTEM ?? fallback.timeSystem).toUpperCase()
 
   return {
-    trajectorySourceLabel: "NASA Artemis Real-Time Orbit Website ephemeris",
-    trajectorySourceUrl: NASA_TRACKING_ARTICLE_URL,
-    ephemerisZipUrl: parsed.ephemerisZipUrl,
-    moonSourceLabel: "JPL Horizons Moon vectors",
-    moonSourceUrl: JPL_HORIZONS_API_URL,
+    trajectorySourceLabel: fallback.trajectorySourceLabel,
+    trajectorySourceUrl: fallback.trajectorySourceUrl,
+    ephemerisZipUrl: fallback.ephemerisZipUrl,
+    moonSourceLabel: fallback.moonSourceLabel,
+    moonSourceUrl: fallback.moonSourceUrl,
     referenceFrame,
     centerName,
     timeSystem,
-    officialSampleCount: parsed.points.length,
-    officialEphemerisEndTime: parsed.points[parsed.points.length - 1].timestamp,
+    officialSampleCount: fallback.officialSampleCount,
+    officialEphemerisEndTime: fallback.officialEphemerisEndTime,
   }
 }
 
@@ -393,69 +401,11 @@ const getCachedOfficialVectorBundle = unstable_cache(
   { revalidate: SOURCE_REVALIDATE_SECONDS }
 )
 
-function buildFallbackSourceMetadata(
-  actualTrajectory: TrajectoryPoint[],
-  reason: string
-): SourceMetadata {
-  return {
-    trajectorySourceLabel: "Bundled fallback trajectory (degraded mode)",
-    trajectorySourceUrl: NASA_TRACKING_ARTICLE_URL,
-    ephemerisZipUrl: "about:blank",
-    moonSourceLabel: "Bundled fallback moon proxy (degraded mode)",
-    moonSourceUrl: JPL_HORIZONS_API_URL,
-    referenceFrame: "ICRF (fallback)",
-    centerName: "Earth (fallback)",
-    timeSystem: "UT",
-    officialSampleCount: actualTrajectory.length,
-    officialEphemerisEndTime: actualTrajectory[actualTrajectory.length - 1].timestamp,
-    fallbackReason: reason,
-  }
-}
-
-const getCachedFallbackVectorBundle = unstable_cache(
-  async () => {
-    const [actualTrajectory, nominalTrajectory] = await Promise.all([
-      getBundledActualTrajectory(),
-      getNominalTrajectory(),
-    ])
-
-    if (actualTrajectory.length === 0 || nominalTrajectory.length === 0) {
-      throw new Error("Bundled fallback trajectory data is empty.")
-    }
-
-    return {
-      spacecraftTrajectory: actualTrajectory,
-      moonTrajectory: nominalTrajectory,
-      sourceMetadata: buildFallbackSourceMetadata(
-        actualTrajectory,
-        "Failed to fetch official NASA/JPL vectors."
-      ),
-    }
-  },
-  ["bundled-fallback-vector-bundle"],
-  { revalidate: SOURCE_REVALIDATE_SECONDS }
-)
-
 export async function getLiveDashboardData(): Promise<DashboardData> {
-  const [config, nominalTrajectory] = await Promise.all([
+  const [config, vectorBundle] = await Promise.all([
     getMissionConfig(),
-    getNominalTrajectory(),
+    getCachedOfficialVectorBundle(),
   ])
-
-  let vectorBundle: Awaited<ReturnType<typeof getCachedOfficialVectorBundle>>
-
-  try {
-    vectorBundle = await getCachedOfficialVectorBundle()
-  } catch (error) {
-    const fallbackVectorBundle = await getCachedFallbackVectorBundle()
-    vectorBundle = {
-      ...fallbackVectorBundle,
-      sourceMetadata: buildFallbackSourceMetadata(
-        fallbackVectorBundle.spacecraftTrajectory,
-        error instanceof Error ? error.message : "Unknown upstream data error."
-      ),
-    }
-  }
 
   const { spacecraftTrajectory, moonTrajectory, sourceMetadata } = vectorBundle
 
@@ -481,6 +431,7 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
   ).position
 
   const actualPath = buildPathUntilTime(spacecraftTrajectory, clampedNowMs)
+  const moonActualPath = buildPathUntilTime(moonTrajectory, clampedNowMs)
 
   const predictionEndMs = Math.min(
     clampedNowMs + PREDICTION_WINDOW_HOURS * 60 * 60 * 1000,
@@ -489,6 +440,13 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
 
   const futurePath = buildTrajectorySamplesBetween(
     spacecraftTrajectory,
+    clampedNowMs,
+    predictionEndMs,
+    30 * 60 * 1000
+  )
+
+  const moonFuturePath = buildTrajectorySamplesBetween(
+    moonTrajectory,
     clampedNowMs,
     predictionEndMs,
     30 * 60 * 1000
@@ -503,20 +461,31 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
     timeline: config.timeline,
   })
 
-  const nextClosestApproachToMoon = computeClosestApproachToMoon(
-    futurePath,
-    moonTrajectory
+  const flownClosestApproachToMoon = computeClosestApproachToMoon(
+    actualPath,
+    moonActualPath
   )
+
+  const flownClosestApproachMoonPoint = interpolateTrajectoryAtTime(
+    moonTrajectory,
+    getTimestampMs(flownClosestApproachToMoon.timestamp)
+  ).position
 
   return {
     config,
     actualPath,
     futurePath,
+    moonActualPath,
+    moonFuturePath,
     currentActualPoint,
     currentMoonPoint,
+    flownClosestApproachToMoon,
+    flownClosestApproachMoonPoint,
     latestMetrics,
-    nextClosestApproachToMoon,
-    sourceMetadata,
+    sourceMetadata: sourceMetadata ?? buildFallbackSourceMetadata(
+      spacecraftTrajectory.length,
+      spacecraftTrajectory[spacecraftTrajectory.length - 1].timestamp
+    ),
     lastUpdated: new Date().toISOString(),
     refreshIntervalSeconds: REFRESH_INTERVAL_SECONDS,
   }

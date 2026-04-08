@@ -27,17 +27,19 @@ export type SourceMetadata = {
   timeSystem: string
   officialSampleCount: number
   officialEphemerisEndTime: string
-  fallbackReason?: string
 }
 
 export type DashboardData = {
   config: MissionConfig
   actualPath: TrajectoryPoint[]
   futurePath: TrajectoryPoint[]
+  moonActualPath: TrajectoryPoint[]
+  moonFuturePath: TrajectoryPoint[]
   currentActualPoint: TrajectoryPoint
   currentMoonPoint: Vector3
+  flownClosestApproachToMoon: ClosestApproachSummary
+  flownClosestApproachMoonPoint: Vector3
   latestMetrics: MissionMetrics
-  nextClosestApproachToMoon: ClosestApproachSummary
   sourceMetadata: SourceMetadata
   lastUpdated: string
   refreshIntervalSeconds: number
