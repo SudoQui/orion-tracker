@@ -48,6 +48,10 @@ async function getNominalTrajectory(): Promise<TrajectoryPoint[]> {
   return readJsonFile<TrajectoryPoint[]>(path.join("data", "nominal-trajectory.json"))
 }
 
+async function getBundledActualTrajectory(): Promise<TrajectoryPoint[]> {
+  return readJsonFile<TrajectoryPoint[]>(path.join("data", "actual-trajectory.json"))
+}
+
 function normalizeTimestamp(raw: string): string {
   return raw.endsWith("Z") ? raw : `${raw}Z`
 }
@@ -389,12 +393,69 @@ const getCachedOfficialVectorBundle = unstable_cache(
   { revalidate: SOURCE_REVALIDATE_SECONDS }
 )
 
+function buildFallbackSourceMetadata(
+  actualTrajectory: TrajectoryPoint[],
+  reason: string
+): SourceMetadata {
+  return {
+    trajectorySourceLabel: "Bundled fallback trajectory (degraded mode)",
+    trajectorySourceUrl: NASA_TRACKING_ARTICLE_URL,
+    ephemerisZipUrl: "about:blank",
+    moonSourceLabel: "Bundled fallback moon proxy (degraded mode)",
+    moonSourceUrl: JPL_HORIZONS_API_URL,
+    referenceFrame: "ICRF (fallback)",
+    centerName: "Earth (fallback)",
+    timeSystem: "UT",
+    officialSampleCount: actualTrajectory.length,
+    officialEphemerisEndTime: actualTrajectory[actualTrajectory.length - 1].timestamp,
+    fallbackReason: reason,
+  }
+}
+
+const getCachedFallbackVectorBundle = unstable_cache(
+  async () => {
+    const [actualTrajectory, nominalTrajectory] = await Promise.all([
+      getBundledActualTrajectory(),
+      getNominalTrajectory(),
+    ])
+
+    if (actualTrajectory.length === 0 || nominalTrajectory.length === 0) {
+      throw new Error("Bundled fallback trajectory data is empty.")
+    }
+
+    return {
+      spacecraftTrajectory: actualTrajectory,
+      moonTrajectory: nominalTrajectory,
+      sourceMetadata: buildFallbackSourceMetadata(
+        actualTrajectory,
+        "Failed to fetch official NASA/JPL vectors."
+      ),
+    }
+  },
+  ["bundled-fallback-vector-bundle"],
+  { revalidate: SOURCE_REVALIDATE_SECONDS }
+)
+
 export async function getLiveDashboardData(): Promise<DashboardData> {
-  const [config, nominalTrajectory, vectorBundle] = await Promise.all([
+  const [config, nominalTrajectory] = await Promise.all([
     getMissionConfig(),
     getNominalTrajectory(),
-    getCachedOfficialVectorBundle(),
   ])
+
+  let vectorBundle: Awaited<ReturnType<typeof getCachedOfficialVectorBundle>>
+
+  try {
+    vectorBundle = await getCachedOfficialVectorBundle()
+  } catch (error) {
+    const fallbackVectorBundle = await getCachedFallbackVectorBundle()
+    vectorBundle = {
+      ...fallbackVectorBundle,
+      sourceMetadata: buildFallbackSourceMetadata(
+        fallbackVectorBundle.spacecraftTrajectory,
+        error instanceof Error ? error.message : "Unknown upstream data error."
+      ),
+    }
+  }
 
   const { spacecraftTrajectory, moonTrajectory, sourceMetadata } = vectorBundle
 

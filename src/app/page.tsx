@@ -57,7 +57,7 @@ export default function HomePage() {
     }
   }, [])
 
-  if (!data) {
+  if (!data && !error) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
         <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
@@ -69,6 +69,24 @@ export default function HomePage() {
         </div>
       </main>
     )
+  }
+
+  if (!data && error) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+        <div className="max-w-xl rounded-3xl border border-amber-400/30 bg-amber-400/10 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
+          <p className="text-lg font-semibold text-amber-200">Dashboard data unavailable</p>
+          <p className="mt-3 text-sm leading-6 text-amber-100/90">{error}</p>
+          <p className="mt-3 text-xs text-amber-100/70">
+            OrionTracker will keep retrying automatically every 5 seconds.
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!data) {
+    return null
   }
 
   return (

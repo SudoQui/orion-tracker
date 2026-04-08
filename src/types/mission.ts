@@ -27,6 +27,7 @@ export type SourceMetadata = {
   timeSystem: string
   officialSampleCount: number
   officialEphemerisEndTime: string
+  fallbackReason?: string
 }
 
 export type DashboardData = {
