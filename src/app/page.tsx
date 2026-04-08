@@ -102,6 +102,7 @@ export default function HomePage() {
             <OrbitView
               actualTrajectory={data.actualPath}
               futureTrajectory={data.futurePath}
+              moonTrajectory={data.moonPath}
               currentMoonPosition={data.currentMoonPoint}
               currentTimestamp={data.currentActualPoint.timestamp}
             />
