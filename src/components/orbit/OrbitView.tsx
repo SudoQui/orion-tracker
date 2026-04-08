@@ -4,7 +4,6 @@ import { formatTimestamp } from "@/lib/formatting/format"
 type OrbitViewProps = {
   actualTrajectory: TrajectoryPoint[]
   futureTrajectory: TrajectoryPoint[]
-  moonTrajectory: TrajectoryPoint[]
   currentMoonPosition: Vector3
   currentTimestamp: string
 }
@@ -17,9 +16,6 @@ type Point2D = {
 const VIEWBOX_WIDTH = 1600
 const VIEWBOX_HEIGHT = 900
 const PADDING = 140
-const EARTH_SIZE = 210
-const MOON_SIZE = 140
-const ORION_SIZE = 72
 
 function getBounds(points: Vector3[]) {
   const xs = points.map((point) => point.x)
@@ -68,14 +64,12 @@ function pathFromTrajectory(
 export default function OrbitView({
   actualTrajectory,
   futureTrajectory,
-  moonTrajectory,
   currentMoonPosition,
   currentTimestamp,
 }: OrbitViewProps) {
   const allVectors = [
     ...actualTrajectory.map((point) => point.position),
     ...futureTrajectory.map((point) => point.position),
-    ...moonTrajectory.map((point) => point.position),
     currentMoonPosition,
     { x: 0, y: 0, z: 0 },
   ]
@@ -84,7 +78,6 @@ export default function OrbitView({
 
   const actualPath = pathFromTrajectory(actualTrajectory, project)
   const futurePath = pathFromTrajectory(futureTrajectory, project)
-  const moonPath = pathFromTrajectory(moonTrajectory, project)
 
   const earthPoint = project({ x: 0, y: 0, z: 0 })
   const moonPoint = project(currentMoonPosition)
@@ -151,16 +144,6 @@ export default function OrbitView({
           />
 
           <path
-            d={moonPath}
-            fill="none"
-            stroke="#cbd5e1"
-            strokeWidth="2"
-            strokeDasharray="6 10"
-            strokeLinecap="round"
-            opacity="0.35"
-          />
-
-          <path
             d={futurePath}
             fill="none"
             stroke="url(#futureStroke)"
@@ -172,61 +155,40 @@ export default function OrbitView({
 
           <image
             href="/images/earth.svg"
-            x={earthPoint.x - EARTH_SIZE / 2}
-            y={earthPoint.y - EARTH_SIZE / 2}
-            width={EARTH_SIZE}
-            height={EARTH_SIZE}
+            x={earthPoint.x - 80}
+            y={earthPoint.y - 80}
+            width="160"
+            height="160"
             preserveAspectRatio="xMidYMid meet"
           />
 
           <image
             href="/images/moon.svg"
-            x={moonPoint.x - MOON_SIZE / 2}
-            y={moonPoint.y - MOON_SIZE / 2}
-            width={MOON_SIZE}
-            height={MOON_SIZE}
+            x={moonPoint.x - 55}
+            y={moonPoint.y - 55}
+            width="110"
+            height="110"
             preserveAspectRatio="xMidYMid meet"
           />
 
           <image
             href="/images/orion.svg"
-            x={currentPoint.x - ORION_SIZE / 2}
-            y={currentPoint.y - ORION_SIZE / 2}
-            width={ORION_SIZE}
-            height={ORION_SIZE}
+            x={currentPoint.x - 34}
+            y={currentPoint.y - 34}
+            width="68"
+            height="68"
             preserveAspectRatio="xMidYMid meet"
           />
 
-          <text
-            x={earthPoint.x - 35}
-            y={earthPoint.y + 105}
-            fill="#93c5fd"
-            fontSize="24"
-            fontFamily="sans-serif"
-            fontWeight="700"
-          >
+          <text x={earthPoint.x - 35} y={earthPoint.y + 105} fill="#93c5fd" fontSize="24" fontFamily="sans-serif" fontWeight="700">
             EARTH
           </text>
 
-          <text
-            x={moonPoint.x - 22}
-            y={moonPoint.y + 82}
-            fill="#e5e7eb"
-            fontSize="20"
-            fontFamily="sans-serif"
-            fontWeight="700"
-          >
+          <text x={moonPoint.x - 22} y={moonPoint.y + 82} fill="#e5e7eb" fontSize="20" fontFamily="sans-serif" fontWeight="700">
             MOON
           </text>
 
-          <text
-            x={currentPoint.x + 38}
-            y={currentPoint.y + 6}
-            fill="#facc15"
-            fontSize="22"
-            fontFamily="sans-serif"
-            fontWeight="700"
-          >
+          <text x={currentPoint.x + 38} y={currentPoint.y + 6} fill="#facc15" fontSize="22" fontFamily="sans-serif" fontWeight="700">
             ORION
           </text>
         </svg>
