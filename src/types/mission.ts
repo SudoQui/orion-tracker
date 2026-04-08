@@ -33,7 +33,6 @@ export type DashboardData = {
   config: MissionConfig
   actualPath: TrajectoryPoint[]
   futurePath: TrajectoryPoint[]
-  moonPath: TrajectoryPoint[]
   currentActualPoint: TrajectoryPoint
   currentMoonPoint: Vector3
   latestMetrics: MissionMetrics

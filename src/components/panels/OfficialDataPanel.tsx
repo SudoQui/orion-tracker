@@ -37,14 +37,8 @@ export default function OfficialDataPanel({
         <Row label="Reference frame" value={sourceMetadata.referenceFrame} />
         <Row label="Center" value={sourceMetadata.centerName} />
         <Row label="Time system" value={sourceMetadata.timeSystem} />
-        <Row
-          label="Official sample count"
-          value={String(sourceMetadata.officialSampleCount)}
-        />
-        <Row
-          label="Ephemeris end"
-          value={formatTimestamp(sourceMetadata.officialEphemerisEndTime)}
-        />
+        <Row label="Official sample count" value={String(sourceMetadata.officialSampleCount)} />
+        <Row label="Ephemeris end" value={formatTimestamp(sourceMetadata.officialEphemerisEndTime)} />
 
         <div className="flex flex-wrap gap-3 pt-2">
           <a
@@ -87,19 +81,11 @@ export default function OfficialDataPanel({
         </div>
 
         <Row label="Future samples shown" value={String(futureSampleCount)} />
-        <Row
-          label="Next closest lunar approach"
-          value={formatKm(nextClosestApproachToMoon.distanceKm)}
-        />
-        <Row
-          label="Approach time"
-          value={formatTimestamp(nextClosestApproachToMoon.timestamp)}
-        />
+        <Row label="Next closest lunar approach" value={formatKm(nextClosestApproachToMoon.distanceKm)} />
+        <Row label="Approach time" value={formatTimestamp(nextClosestApproachToMoon.timestamp)} />
 
         <p className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-sm leading-6 text-slate-400">
-          This panel only shows values derived from official vector datasets. No simulated
-          comms, nominal overlays, or guessed burn windows are included in this accuracy
-          mode.
+          This panel only shows values derived from official vector datasets.
         </p>
       </div>
     </div>
