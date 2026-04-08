@@ -39,3 +39,37 @@ export type MissionMetrics = {
   deviationFromNominalKm: number
   missionPhase: MissionPhase
 }
+
+export type CommsStation = "Goldstone" | "Madrid" | "Canberra"
+
+export type CommsStatus = {
+  station: CommsStation
+  signalStrengthDb: number
+  roundTripLightTimeSeconds: number
+  uplinkKbps: number
+  downlinkMbps: number
+  status: "High Gain Lock" | "Nominal" | "Attenuated"
+}
+
+export type BurnWindowStatus = "Completed" | "Active" | "Upcoming"
+
+export type BurnWindow = {
+  id: string
+  label: string
+  startTime: string
+  endTime: string
+  deltaVms: number
+  objective: string
+  status: BurnWindowStatus
+}
+
+export type ClosestApproachPrediction = {
+  target: "Moon" | "Earth"
+  timestamp: string
+  distanceKm: number
+}
+
+export type ReentryCorridor = {
+  visible: boolean
+  path: Vector3[]
+}

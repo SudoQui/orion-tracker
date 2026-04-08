@@ -1,0 +1,27 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="moonBase" cx="42%" cy="38%" r="65%">
+      <stop offset="0%" stop-color="#f8fafc"></stop>
+      <stop offset="60%" stop-color="#d1d5db"></stop>
+      <stop offset="100%" stop-color="#6b7280"></stop>
+    </radialGradient>
+    <filter id="moonGlow">
+      <feGaussianBlur stdDeviation="10" result="blur"></feGaussianBlur>
+      <feMerge>
+        <feMergeNode in="blur"></feMergeNode>
+        <feMergeNode in="SourceGraphic"></feMergeNode>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <circle cx="256" cy="256" r="205" fill="rgba(255,255,255,0.15)" filter="url(#moonGlow)"></circle>
+  <circle cx="256" cy="256" r="176" fill="url(#moonBase)"></circle>
+  <circle cx="180" cy="170" r="28" fill="#9ca3af" opacity="0.5"></circle>
+  <circle cx="224" cy="126" r="20" fill="#9ca3af" opacity="0.45"></circle>
+  <circle cx="308" cy="176" r="36" fill="#9ca3af" opacity="0.48"></circle>
+  <circle cx="332" cy="258" r="24" fill="#9ca3af" opacity="0.55"></circle>
+  <circle cx="178" cy="294" r="42" fill="#9ca3af" opacity="0.45"></circle>
+  <circle cx="258" cy="322" r="30" fill="#9ca3af" opacity="0.4"></circle>
+  <circle cx="135" cy="238" r="18" fill="#6b7280" opacity="0.35"></circle>
+  <ellipse cx="238" cy="216" rx="112" ry="86" fill="rgba(255,255,255,0.08)"></ellipse>
+</svg>

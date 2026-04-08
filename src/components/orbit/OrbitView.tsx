@@ -1,9 +1,23 @@
-import type { TrajectoryPoint, Vector3 } from "@/types/trajectory"
+import type {
+  BurnWindow,
+  ReentryCorridor,
+  TrajectoryPoint,
+  Vector3,
+} from "@/types/trajectory"
+import {
+  getTimestampMs,
+  interpolateTrajectoryAtTime,
+} from "@/lib/math/trajectory"
+import { formatTimestamp } from "@/lib/formatting/format"
 
 type OrbitViewProps = {
   nominalTrajectory: TrajectoryPoint[]
   actualTrajectory: TrajectoryPoint[]
+  predictedTrajectory: TrajectoryPoint[]
   moonPosition: Vector3
+  burnWindows: BurnWindow[]
+  reentryCorridor: ReentryCorridor
+  currentTimestamp: string
 }
 
 type Point2D = {
@@ -11,25 +25,62 @@ type Point2D = {
   y: number
 }
 
-const VIEWBOX_SIZE = 1000
-const CENTER = VIEWBOX_SIZE / 2
-const SCALE = 0.00055
+const VIEWBOX_WIDTH = 1600
+const VIEWBOX_HEIGHT = 900
+const PADDING = 140
 
-function projectPoint(position: Vector3): Point2D {
+function getBounds(points: Vector3[]) {
+  const xs = points.map((point) => point.x)
+  const ys = points.map((point) => point.y)
+
   return {
-    x: CENTER + position.x * SCALE,
-    y: CENTER - position.y * SCALE,
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
   }
 }
 
-function toSvgPath(points: TrajectoryPoint[]): string {
+function createProjector(points: Vector3[]) {
+  const bounds = getBounds(points)
+  const spanX = Math.max(bounds.maxX - bounds.minX, 1)
+  const spanY = Math.max(bounds.maxY - bounds.minY, 1)
+  const scale = Math.min(
+    (VIEWBOX_WIDTH - PADDING * 2) / spanX,
+    (VIEWBOX_HEIGHT - PADDING * 2) / spanY
+  )
+
+  const offsetX = (VIEWBOX_WIDTH - spanX * scale) / 2 - bounds.minX * scale
+  const offsetY = (VIEWBOX_HEIGHT - spanY * scale) / 2 + bounds.maxY * scale
+
+  return (point: Vector3): Point2D => ({
+    x: point.x * scale + offsetX,
+    y: offsetY - point.y * scale,
+  })
+}
+
+function pathFromTrajectory(
+  points: TrajectoryPoint[],
+  project: (point: Vector3) => Point2D
+): string {
   if (points.length === 0) return ""
 
   return points
     .map((point, index) => {
-      const projected = projectPoint(point.position)
-      const command = index === 0 ? "M" : "L"
-      return `${command} ${projected.x.toFixed(2)} ${projected.y.toFixed(2)}`
+      const projected = project(point.position)
+      return `${index === 0 ? "M" : "L"} ${projected.x.toFixed(2)} ${projected.y.toFixed(2)}`
+    })
+    .join(" ")
+}
+
+function polygonFromVectors(
+  points: Vector3[],
+  project: (point: Vector3) => Point2D
+): string {
+  return points
+    .map((point) => {
+      const projected = project(point)
+      return `${projected.x.toFixed(2)},${projected.y.toFixed(2)}`
     })
     .join(" ")
 }
@@ -37,158 +88,211 @@ function toSvgPath(points: TrajectoryPoint[]): string {
 export default function OrbitView({
   nominalTrajectory,
   actualTrajectory,
+  predictedTrajectory,
   moonPosition,
+  burnWindows,
+  reentryCorridor,
+  currentTimestamp,
 }: OrbitViewProps) {
-  const actualCurrent = actualTrajectory[actualTrajectory.length - 1]
+  const allVectors = [
+    ...nominalTrajectory.map((point) => point.position),
+    ...actualTrajectory.map((point) => point.position),
+    ...predictedTrajectory.map((point) => point.position),
+    moonPosition,
+    { x: 0, y: 0, z: 0 },
+    ...reentryCorridor.path,
+  ]
 
-  const earth = { x: CENTER, y: CENTER }
-  const moon = projectPoint(moonPosition)
-  const nominalPath = toSvgPath(nominalTrajectory)
-  const actualPath = toSvgPath(actualTrajectory)
-  const currentPoint = projectPoint(actualCurrent.position)
+  const project = createProjector(allVectors)
+  const nominalPath = pathFromTrajectory(nominalTrajectory, project)
+  const actualPath = pathFromTrajectory(actualTrajectory, project)
+  const predictedPath = pathFromTrajectory(predictedTrajectory, project)
+  const earthPoint = project({ x: 0, y: 0, z: 0 })
+  const moonPoint = project(moonPosition)
+  const currentPoint = project(actualTrajectory[actualTrajectory.length - 1].position)
+
+  const burnMarkers = burnWindows.map((window) => {
+    const marker = interpolateTrajectoryAtTime(
+      nominalTrajectory,
+      getTimestampMs(window.startTime)
+    )
+    return {
+      ...window,
+      projected: project(marker.position),
+    }
+  })
+
+  const corridorPoints =
+    reentryCorridor.visible && reentryCorridor.path.length >= 3
+      ? polygonFromVectors(reentryCorridor.path, project)
+      : ""
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#020617]">
-      <div className="border-b border-white/10 px-4 py-3">
-        <h3 className="text-lg font-semibold text-white">Trajectory View</h3>
-        <p className="text-sm text-slate-400">
-          Earth centered 2D mission view for MVP
-        </p>
+    <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/80 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
+      <div className="flex flex-col gap-2 border-b border-white/10 px-5 py-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-white">Mission map</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Full trajectory view with actual, nominal, forecast, and planning overlays
+          </p>
+        </div>
+
+        <div className="text-sm text-slate-500">
+          Current mission time: {formatTimestamp(currentTimestamp)}
+        </div>
       </div>
 
       <div className="p-4">
         <svg
-          viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`}
-          className="h-[520px] w-full rounded-xl bg-[radial-gradient(circle_at_center,_rgba(30,41,59,0.8),_rgba(2,6,23,1))]"
+          viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
+          className="h-[720px] w-full rounded-2xl bg-[#030712]"
         >
           <defs>
-            <pattern
-              id="starPattern"
-              width="120"
-              height="120"
-              patternUnits="userSpaceOnUse"
-            >
-              <circle cx="20" cy="25" r="1.2" fill="white" opacity="0.6" />
-              <circle cx="60" cy="50" r="1.5" fill="white" opacity="0.5" />
-              <circle cx="90" cy="15" r="1" fill="white" opacity="0.5" />
-              <circle cx="35" cy="95" r="1.3" fill="white" opacity="0.4" />
-              <circle cx="105" cy="80" r="1.1" fill="white" opacity="0.4" />
+            <pattern id="smallGrid" width="60" height="60" patternUnits="userSpaceOnUse">
+              <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(56,189,248,0.05)" strokeWidth="1" />
             </pattern>
+            <pattern id="largeGrid" width="180" height="180" patternUnits="userSpaceOnUse">
+              <rect width="180" height="180" fill="url(#smallGrid)" />
+              <path d="M 180 0 L 0 0 0 180" fill="none" stroke="rgba(56,189,248,0.08)" strokeWidth="1.2" />
+            </pattern>
+            <pattern id="stars" width="220" height="220" patternUnits="userSpaceOnUse">
+              <circle cx="20" cy="30" r="1.3" fill="white" opacity="0.55" />
+              <circle cx="60" cy="130" r="1.1" fill="white" opacity="0.4" />
+              <circle cx="130" cy="70" r="1.5" fill="white" opacity="0.5" />
+              <circle cx="180" cy="25" r="1.1" fill="white" opacity="0.35" />
+              <circle cx="200" cy="180" r="1.6" fill="white" opacity="0.55" />
+              <circle cx="95" cy="190" r="1.1" fill="white" opacity="0.4" />
+            </pattern>
+            <linearGradient id="actualStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#34d399" />
+              <stop offset="100%" stopColor="#86efac" />
+            </linearGradient>
+            <linearGradient id="predictedStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#22d3ee" />
+              <stop offset="100%" stopColor="#93c5fd" />
+            </linearGradient>
           </defs>
 
-          <rect width="100%" height="100%" fill="url(#starPattern)" />
+          <rect width="100%" height="100%" fill="#020617" />
+          <rect width="100%" height="100%" fill="url(#stars)" />
+          <rect width="100%" height="100%" fill="url(#largeGrid)" />
 
-          <circle
-            cx={earth.x}
-            cy={earth.y}
-            r="18"
-            fill="#38bdf8"
-            stroke="#7dd3fc"
-            strokeWidth="4"
-          />
-          <text
-            x={earth.x + 26}
-            y={earth.y + 5}
-            fill="#bae6fd"
-            fontSize="24"
-            fontFamily="sans-serif"
-          >
-            Earth
-          </text>
-
-          <circle
-            cx={moon.x}
-            cy={moon.y}
-            r="10"
-            fill="#e5e7eb"
-            stroke="#f8fafc"
-            strokeWidth="2"
-          />
-          <text
-            x={moon.x + 18}
-            y={moon.y + 5}
-            fill="#e2e8f0"
-            fontSize="20"
-            fontFamily="sans-serif"
-          >
-            Moon
-          </text>
+          {corridorPoints ? (
+            <polygon
+              points={corridorPoints}
+              fill="rgba(251, 146, 60, 0.12)"
+              stroke="rgba(251, 146, 60, 0.4)"
+              strokeWidth="2"
+            />
+          ) : null}
 
           <path
             d={nominalPath}
             fill="none"
-            stroke="#60a5fa"
-            strokeWidth="4"
-            strokeDasharray="10 8"
-            opacity="0.8"
+            stroke="rgba(34,197,94,0.55)"
+            strokeWidth="5"
+            strokeDasharray="12 10"
           />
 
           <path
             d={actualPath}
             fill="none"
-            stroke="#22c55e"
+            stroke="url(#actualStroke)"
+            strokeWidth="7"
+            strokeLinecap="round"
+          />
+
+          <path
+            d={predictedPath}
+            fill="none"
+            stroke="url(#predictedStroke)"
             strokeWidth="5"
+            strokeDasharray="12 10"
+            strokeLinecap="round"
             opacity="0.9"
           />
 
-          <circle
-            cx={currentPoint.x}
-            cy={currentPoint.y}
-            r="9"
-            fill="#f97316"
-            stroke="#fdba74"
-            strokeWidth="3"
+          {burnMarkers.map((window) => (
+            <g key={window.id}>
+              <circle
+                cx={window.projected.x}
+                cy={window.projected.y}
+                r="10"
+                fill="rgba(245, 158, 11, 0.15)"
+                stroke="rgba(245, 158, 11, 0.9)"
+                strokeWidth="3"
+              />
+              <text
+                x={window.projected.x + 14}
+                y={window.projected.y - 12}
+                fill="#fcd34d"
+                fontSize="18"
+                fontFamily="sans-serif"
+              >
+                {window.label}
+              </text>
+            </g>
+          ))}
+
+          <image
+            href="/images/earth.svg"
+            x={earthPoint.x - 80}
+            y={earthPoint.y - 80}
+            width="160"
+            height="160"
+            preserveAspectRatio="xMidYMid meet"
           />
+
+          <image
+            href="/images/moon.svg"
+            x={moonPoint.x - 55}
+            y={moonPoint.y - 55}
+            width="110"
+            height="110"
+            preserveAspectRatio="xMidYMid meet"
+          />
+
+          <image
+            href="/images/orion.svg"
+            x={currentPoint.x - 34}
+            y={currentPoint.y - 34}
+            width="68"
+            height="68"
+            preserveAspectRatio="xMidYMid meet"
+          />
+
           <text
-            x={currentPoint.x + 16}
-            y={currentPoint.y - 12}
-            fill="#fed7aa"
-            fontSize="18"
+            x={earthPoint.x - 35}
+            y={earthPoint.y + 105}
+            fill="#93c5fd"
+            fontSize="24"
             fontFamily="sans-serif"
+            fontWeight="700"
           >
-            Orion
+            EARTH
           </text>
 
-          <g transform="translate(30, 30)">
-            <rect
-              x="0"
-              y="0"
-              width="280"
-              height="95"
-              rx="16"
-              fill="rgba(15, 23, 42, 0.86)"
-              stroke="rgba(255,255,255,0.12)"
-            />
-            <line
-              x1="18"
-              y1="24"
-              x2="70"
-              y2="24"
-              stroke="#60a5fa"
-              strokeWidth="4"
-              strokeDasharray="8 6"
-            />
-            <text x="85" y="30" fill="#e2e8f0" fontSize="18">
-              Nominal trajectory
-            </text>
+          <text
+            x={moonPoint.x - 22}
+            y={moonPoint.y + 82}
+            fill="#e5e7eb"
+            fontSize="20"
+            fontFamily="sans-serif"
+            fontWeight="700"
+          >
+            MOON
+          </text>
 
-            <line
-              x1="18"
-              y1="50"
-              x2="70"
-              y2="50"
-              stroke="#22c55e"
-              strokeWidth="4"
-            />
-            <text x="85" y="56" fill="#e2e8f0" fontSize="18">
-              Actual trajectory
-            </text>
-
-            <circle cx="44" cy="76" r="6" fill="#f97316" />
-            <text x="85" y="82" fill="#e2e8f0" fontSize="18">
-              Current spacecraft
-            </text>
-          </g>
+          <text
+            x={currentPoint.x + 38}
+            y={currentPoint.y + 6}
+            fill="#facc15"
+            fontSize="22"
+            fontFamily="sans-serif"
+            fontWeight="700"
+          >
+            ORION
+          </text>
         </svg>
       </div>
     </div>

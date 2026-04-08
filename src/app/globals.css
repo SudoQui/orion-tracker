@@ -12,10 +12,28 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top, rgba(14, 165, 233, 0.08), transparent 30%),
+    radial-gradient(circle at top, rgba(6, 182, 212, 0.08), transparent 20%),
+    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.05), transparent 22%),
     linear-gradient(to bottom, #020617, #020617);
   color: white;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.65);
 }

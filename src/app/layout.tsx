@@ -2,9 +2,9 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "OrionTracker",
+  title: "OrionTracker | Artemis II Mission Console",
   description:
-    "A dashboard for visualizing Artemis II trajectory, mission progress, and engineering metrics.",
+    "A mission monitoring dashboard for Artemis II featuring live trajectory, comms, prediction overlays, and engineering metrics.",
 }
 
 export default function RootLayout({
