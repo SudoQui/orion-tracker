@@ -11,7 +11,6 @@ import type {
 } from "@/types/mission"
 import type { TrajectoryPoint } from "@/types/trajectory"
 import {
-  buildPathUntilTime,
   buildTrajectorySamplesBetween,
   computeClosestApproachToMoon,
   computeMissionMetrics,
@@ -26,13 +25,14 @@ const JPL_HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 
 const REFRESH_INTERVAL_SECONDS = 5
 const SOURCE_REVALIDATE_SECONDS = 300
-const PREDICTION_WINDOW_HOURS = 24
 
 type ParsedEphemeris = {
   points: TrajectoryPoint[]
   metadata: Record<string, string>
   ephemerisZipUrl: string
 }
+
+const TRAJECTORY_SAMPLE_STEP_MS = 30 * 60 * 1000
 
 async function readJsonFile<T>(relativePath: string): Promise<T> {
   const filePath = path.join(process.cwd(), "public", relativePath)
@@ -42,6 +42,10 @@ async function readJsonFile<T>(relativePath: string): Promise<T> {
 
 async function getMissionConfig(): Promise<MissionConfig> {
   return readJsonFile<MissionConfig>(path.join("data", "mission-config.json"))
+}
+
+async function getNominalTrajectory(): Promise<TrajectoryPoint[]> {
+  return readJsonFile<TrajectoryPoint[]>(path.join("data", "nominal-trajectory.json"))
 }
 
 function normalizeTimestamp(raw: string): string {
@@ -386,26 +390,91 @@ const getCachedOfficialVectorBundle = unstable_cache(
 )
 
 export async function getLiveDashboardData(): Promise<DashboardData> {
-  const [config, vectorBundle] = await Promise.all([
+  const [config, nominalTrajectory, vectorBundle] = await Promise.all([
     getMissionConfig(),
+    getNominalTrajectory(),
     getCachedOfficialVectorBundle(),
   ])
 
   const { spacecraftTrajectory, moonTrajectory, sourceMetadata } = vectorBundle
 
-  if (spacecraftTrajectory.length === 0 || moonTrajectory.length === 0) {
+  if (
+    spacecraftTrajectory.length === 0 ||
+    moonTrajectory.length === 0 ||
+    nominalTrajectory.length === 0
+  ) {
     throw new Error("Official trajectory data is empty.")
   }
 
-  const startMs = getTimestampMs(spacecraftTrajectory[0].timestamp)
-  const endMs = getTimestampMs(
+  const missionStartMs = getTimestampMs(config.launchTime)
+  const missionEndMs = getTimestampMs(config.plannedEndTime)
+  const officialStartMs = getTimestampMs(spacecraftTrajectory[0].timestamp)
+  const officialEndMs = getTimestampMs(
     spacecraftTrajectory[spacecraftTrajectory.length - 1].timestamp
   )
+  const moonStartMs = getTimestampMs(moonTrajectory[0].timestamp)
+  const moonEndMs = getTimestampMs(moonTrajectory[moonTrajectory.length - 1].timestamp)
   const nowMs = Date.now()
-  const clampedNowMs = Math.min(Math.max(nowMs, startMs), endMs)
+  const clampedNowMs = Math.min(Math.max(nowMs, missionStartMs), missionEndMs)
+
+  const sampleRange = (
+    points: TrajectoryPoint[],
+    startMs: number,
+    endMs: number
+  ): TrajectoryPoint[] => {
+    if (endMs <= startMs) return []
+    return buildTrajectorySamplesBetween(
+      points,
+      startMs,
+      endMs,
+      TRAJECTORY_SAMPLE_STEP_MS
+    )
+  }
+
+  const actualPath = [
+    ...sampleRange(
+      nominalTrajectory,
+      missionStartMs,
+      Math.min(clampedNowMs, officialStartMs)
+    ),
+    ...sampleRange(
+      spacecraftTrajectory,
+      Math.max(missionStartMs, officialStartMs),
+      Math.min(clampedNowMs, officialEndMs)
+    ),
+    ...sampleRange(
+      nominalTrajectory,
+      Math.max(missionStartMs, officialEndMs),
+      Math.min(clampedNowMs, missionEndMs)
+    ),
+  ].filter((point, index, array) => {
+    if (index === 0) return true
+    return point.timestamp !== array[index - 1].timestamp
+  })
+
+  const futurePath = [
+    ...sampleRange(
+      spacecraftTrajectory,
+      clampedNowMs,
+      Math.min(missionEndMs, officialEndMs)
+    ),
+    ...sampleRange(
+      nominalTrajectory,
+      Math.max(clampedNowMs, officialEndMs),
+      missionEndMs
+    ),
+  ].filter((point, index, array) => {
+    if (index === 0) return true
+    return point.timestamp !== array[index - 1].timestamp
+  })
+
+  const trajectoryForCurrentPoint =
+    clampedNowMs >= officialStartMs && clampedNowMs <= officialEndMs
+      ? spacecraftTrajectory
+      : nominalTrajectory
 
   const currentActualPoint = interpolateTrajectoryAtTime(
-    spacecraftTrajectory,
+    trajectoryForCurrentPoint,
     clampedNowMs
   )
 
@@ -414,18 +483,10 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
     clampedNowMs
   ).position
 
-  const actualPath = buildPathUntilTime(spacecraftTrajectory, clampedNowMs)
-
-  const predictionEndMs = Math.min(
-    clampedNowMs + PREDICTION_WINDOW_HOURS * 60 * 60 * 1000,
-    endMs
-  )
-
-  const futurePath = buildTrajectorySamplesBetween(
-    spacecraftTrajectory,
-    clampedNowMs,
-    predictionEndMs,
-    30 * 60 * 1000
+  const moonPath = sampleRange(
+    moonTrajectory,
+    Math.max(missionStartMs, moonStartMs),
+    Math.min(missionEndMs, moonEndMs)
   )
 
   const latestMetrics = computeMissionMetrics({
@@ -446,6 +507,7 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
     config,
     actualPath,
     futurePath,
+    moonPath,
     currentActualPoint,
     currentMoonPoint,
     latestMetrics,
