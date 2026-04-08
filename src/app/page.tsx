@@ -6,8 +6,7 @@ import Header from "@/components/layout/Header"
 import SectionCard from "@/components/layout/SectionCard"
 import MissionStats from "@/components/metrics/MissionStats"
 import OrbitView from "@/components/orbit/OrbitView"
-import CommsPanel from "@/components/panels/CommsPanel"
-import PredictionsPanel from "@/components/panels/PredictionsPanel"
+import OfficialDataPanel from "@/components/panels/OfficialDataPanel"
 import MissionTimeline from "@/components/timeline/MissionTimeline"
 import { formatTimestamp } from "@/lib/formatting/format"
 import type { DashboardData } from "@/types/mission"
@@ -63,9 +62,9 @@ export default function HomePage() {
       <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
         <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
           <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-cyan-400/20 border-t-cyan-300" />
-          <p className="mt-4 text-lg font-medium">Booting OrionTracker mission console...</p>
+          <p className="mt-4 text-lg font-medium">Booting OrionTracker accuracy mode...</p>
           <p className="mt-2 text-sm text-slate-400">
-            Pulling trajectory, mission, and communication data
+            Pulling official NASA and JPL vectors
           </p>
         </div>
       </main>
@@ -78,7 +77,7 @@ export default function HomePage() {
         <Header
           missionName={data.config.missionName}
           vehicleName={data.config.vehicleName}
-          statusLabel={`Auto-refresh every ${data.refreshIntervalSeconds}s`}
+          statusLabel={`Official NASA/JPL data · UI refresh ${data.refreshIntervalSeconds}s`}
           updatedAt={formatTimestamp(data.lastUpdated)}
           linkedinUrl={LINKEDIN_URL}
           githubUrl={GITHUB_URL}
@@ -91,47 +90,38 @@ export default function HomePage() {
         ) : null}
 
         <div className="mt-6 grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)_340px]">
+          <SectionCard
+            title="Mission metrics"
+            subtitle="Only official or officially-derived values"
+            className="h-fit"
+          >
+            <MissionStats metrics={data.latestMetrics} />
+          </SectionCard>
+
           <div className="space-y-6">
-            <SectionCard
-              title="Mission metrics"
-              subtitle="Live derived engineering values"
-            >
-              <MissionStats metrics={data.latestMetrics} />
-            </SectionCard>
+            <OrbitView
+              actualTrajectory={data.actualPath}
+              futureTrajectory={data.futurePath}
+              currentMoonPosition={data.currentMoonPoint}
+              currentTimestamp={data.currentActualPoint.timestamp}
+            />
 
             <SectionCard
-              title="Communications"
-              subtitle="Deep Space Network contact snapshot"
+              title="Official data status"
+              subtitle="Source provenance and future outlook from official vectors"
             >
-              <CommsPanel comms={data.comms} />
-            </SectionCard>
-
-            <SectionCard
-              title="Planning and prediction"
-              subtitle="Forecast overlays and mission planning cues"
-            >
-              <PredictionsPanel
-                predictedPath={data.predictedPath}
-                burnWindows={data.burnWindows}
-                nextClosestApproach={data.nextClosestApproach}
-                reentryCorridor={data.reentryCorridor}
+              <OfficialDataPanel
+                sourceMetadata={data.sourceMetadata}
+                nextClosestApproachToMoon={data.nextClosestApproachToMoon}
+                futureSampleCount={data.futurePath.length}
               />
             </SectionCard>
           </div>
 
-          <OrbitView
-            nominalTrajectory={data.nominalPath}
-            actualTrajectory={data.actualPath}
-            predictedTrajectory={data.predictedPath}
-            moonPosition={data.config.moonReferencePosition}
-            burnWindows={data.burnWindows}
-            reentryCorridor={data.reentryCorridor}
-            currentTimestamp={data.currentActualPoint.timestamp}
-          />
-
           <SectionCard
             title="Mission timeline"
-            subtitle="Event progression across the Artemis II profile"
+            subtitle="Current event pinned to the top"
+            className="h-fit"
           >
             <MissionTimeline
               events={data.config.timeline}

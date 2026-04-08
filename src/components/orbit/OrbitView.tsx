@@ -1,22 +1,10 @@
-import type {
-  BurnWindow,
-  ReentryCorridor,
-  TrajectoryPoint,
-  Vector3,
-} from "@/types/trajectory"
-import {
-  getTimestampMs,
-  interpolateTrajectoryAtTime,
-} from "@/lib/math/trajectory"
+import type { TrajectoryPoint, Vector3 } from "@/types/trajectory"
 import { formatTimestamp } from "@/lib/formatting/format"
 
 type OrbitViewProps = {
-  nominalTrajectory: TrajectoryPoint[]
   actualTrajectory: TrajectoryPoint[]
-  predictedTrajectory: TrajectoryPoint[]
-  moonPosition: Vector3
-  burnWindows: BurnWindow[]
-  reentryCorridor: ReentryCorridor
+  futureTrajectory: TrajectoryPoint[]
+  currentMoonPosition: Vector3
   currentTimestamp: string
 }
 
@@ -73,59 +61,29 @@ function pathFromTrajectory(
     .join(" ")
 }
 
-function polygonFromVectors(
-  points: Vector3[],
-  project: (point: Vector3) => Point2D
-): string {
-  return points
-    .map((point) => {
-      const projected = project(point)
-      return `${projected.x.toFixed(2)},${projected.y.toFixed(2)}`
-    })
-    .join(" ")
-}
-
 export default function OrbitView({
-  nominalTrajectory,
   actualTrajectory,
-  predictedTrajectory,
-  moonPosition,
-  burnWindows,
-  reentryCorridor,
+  futureTrajectory,
+  currentMoonPosition,
   currentTimestamp,
 }: OrbitViewProps) {
   const allVectors = [
-    ...nominalTrajectory.map((point) => point.position),
     ...actualTrajectory.map((point) => point.position),
-    ...predictedTrajectory.map((point) => point.position),
-    moonPosition,
+    ...futureTrajectory.map((point) => point.position),
+    currentMoonPosition,
     { x: 0, y: 0, z: 0 },
-    ...reentryCorridor.path,
   ]
 
   const project = createProjector(allVectors)
-  const nominalPath = pathFromTrajectory(nominalTrajectory, project)
+
   const actualPath = pathFromTrajectory(actualTrajectory, project)
-  const predictedPath = pathFromTrajectory(predictedTrajectory, project)
+  const futurePath = pathFromTrajectory(futureTrajectory, project)
+
   const earthPoint = project({ x: 0, y: 0, z: 0 })
-  const moonPoint = project(moonPosition)
-  const currentPoint = project(actualTrajectory[actualTrajectory.length - 1].position)
-
-  const burnMarkers = burnWindows.map((window) => {
-    const marker = interpolateTrajectoryAtTime(
-      nominalTrajectory,
-      getTimestampMs(window.startTime)
-    )
-    return {
-      ...window,
-      projected: project(marker.position),
-    }
-  })
-
-  const corridorPoints =
-    reentryCorridor.visible && reentryCorridor.path.length >= 3
-      ? polygonFromVectors(reentryCorridor.path, project)
-      : ""
+  const moonPoint = project(currentMoonPosition)
+  const currentPoint = project(
+    actualTrajectory[actualTrajectory.length - 1].position
+  )
 
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/80 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
@@ -133,7 +91,7 @@ export default function OrbitView({
         <div>
           <h2 className="text-xl font-semibold text-white">Mission map</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Full trajectory view with actual, nominal, forecast, and planning overlays
+            Official NASA trajectory with current JPL Moon position
           </p>
         </div>
 
@@ -167,7 +125,7 @@ export default function OrbitView({
               <stop offset="0%" stopColor="#34d399" />
               <stop offset="100%" stopColor="#86efac" />
             </linearGradient>
-            <linearGradient id="predictedStroke" x1="0%" y1="0%" x2="100%" y2="0%">
+            <linearGradient id="futureStroke" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stopColor="#22d3ee" />
               <stop offset="100%" stopColor="#93c5fd" />
             </linearGradient>
@@ -176,23 +134,6 @@ export default function OrbitView({
           <rect width="100%" height="100%" fill="#020617" />
           <rect width="100%" height="100%" fill="url(#stars)" />
           <rect width="100%" height="100%" fill="url(#largeGrid)" />
-
-          {corridorPoints ? (
-            <polygon
-              points={corridorPoints}
-              fill="rgba(251, 146, 60, 0.12)"
-              stroke="rgba(251, 146, 60, 0.4)"
-              strokeWidth="2"
-            />
-          ) : null}
-
-          <path
-            d={nominalPath}
-            fill="none"
-            stroke="rgba(34,197,94,0.55)"
-            strokeWidth="5"
-            strokeDasharray="12 10"
-          />
 
           <path
             d={actualPath}
@@ -203,36 +144,14 @@ export default function OrbitView({
           />
 
           <path
-            d={predictedPath}
+            d={futurePath}
             fill="none"
-            stroke="url(#predictedStroke)"
+            stroke="url(#futureStroke)"
             strokeWidth="5"
             strokeDasharray="12 10"
             strokeLinecap="round"
-            opacity="0.9"
+            opacity="0.95"
           />
-
-          {burnMarkers.map((window) => (
-            <g key={window.id}>
-              <circle
-                cx={window.projected.x}
-                cy={window.projected.y}
-                r="10"
-                fill="rgba(245, 158, 11, 0.15)"
-                stroke="rgba(245, 158, 11, 0.9)"
-                strokeWidth="3"
-              />
-              <text
-                x={window.projected.x + 14}
-                y={window.projected.y - 12}
-                fill="#fcd34d"
-                fontSize="18"
-                fontFamily="sans-serif"
-              >
-                {window.label}
-              </text>
-            </g>
-          ))}
 
           <image
             href="/images/earth.svg"

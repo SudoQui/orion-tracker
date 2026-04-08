@@ -1,28 +1,38 @@
 import { readFile } from "fs/promises"
 import path from "path"
 
-import type { DashboardData, MissionConfig } from "@/types/mission"
+import JSZip from "jszip"
+import { unstable_cache } from "next/cache"
+
 import type {
-  BurnWindow,
-  ClosestApproachPrediction,
-  CommsStatus,
-  ReentryCorridor,
-  TrajectoryPoint,
-  Vector3,
-} from "@/types/trajectory"
+  DashboardData,
+  MissionConfig,
+  SourceMetadata,
+} from "@/types/mission"
+import type { TrajectoryPoint } from "@/types/trajectory"
 import {
   buildPathUntilTime,
   buildTrajectorySamplesBetween,
-  computeDistanceFromMoonKm,
+  computeClosestApproachToMoon,
   computeMissionMetrics,
   getTimestampMs,
   interpolateTrajectoryAtTime,
 } from "@/lib/math/trajectory"
 
-const SPEED_OF_LIGHT_KM_PER_SECOND = 299_792.458
-const DEMO_LOOP_SECONDS = 480
+const NASA_TRACKING_ARTICLE_URL =
+  "https://www.nasa.gov/missions/artemis/artemis-2/track-nasas-artemis-ii-mission-in-real-time/"
+const NASA_BASE_URL = "https://www.nasa.gov"
+const JPL_HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
+
 const REFRESH_INTERVAL_SECONDS = 5
+const SOURCE_REVALIDATE_SECONDS = 300
 const PREDICTION_WINDOW_HOURS = 24
+
+type ParsedEphemeris = {
+  points: TrajectoryPoint[]
+  metadata: Record<string, string>
+  ephemerisZipUrl: string
+}
 
 async function readJsonFile<T>(relativePath: string): Promise<T> {
   const filePath = path.join(process.cwd(), "public", relativePath)
@@ -34,267 +44,413 @@ async function getMissionConfig(): Promise<MissionConfig> {
   return readJsonFile<MissionConfig>(path.join("data", "mission-config.json"))
 }
 
-async function getNominalTrajectory(): Promise<TrajectoryPoint[]> {
-  return readJsonFile<TrajectoryPoint[]>(
-    path.join("data", "nominal-trajectory.json")
+function normalizeTimestamp(raw: string): string {
+  return raw.endsWith("Z") ? raw : `${raw}Z`
+}
+
+function parseTrajectoryDataLine(line: string): TrajectoryPoint | null {
+  const normalized = line.replaceAll(",", " ").trim()
+
+  const isoMatch = normalized.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)$/
   )
-}
 
-async function getActualTrajectory(): Promise<TrajectoryPoint[]> {
-  return readJsonFile<TrajectoryPoint[]>(
-    path.join("data", "actual-trajectory.json")
-  )
-}
-
-function getDemoCurrentTimeMs(actualTrajectory: TrajectoryPoint[]): number {
-  const startMs = getTimestampMs(actualTrajectory[0].timestamp)
-  const endMs = getTimestampMs(actualTrajectory[actualTrajectory.length - 1].timestamp)
-  const fraction = ((Date.now() / 1000) % DEMO_LOOP_SECONDS) / DEMO_LOOP_SECONDS
-  return startMs + (endMs - startMs) * fraction
-}
-
-function getTimelineTime(config: MissionConfig, eventId: string, fallback: string): string {
-  const event = config.timeline.find((timelineEvent) => timelineEvent.id === eventId)
-  return event?.timestamp ?? fallback
-}
-
-function getBurnWindows(config: MissionConfig, currentTimeMs: number): BurnWindow[] {
-  const windows: Omit<BurnWindow, "status">[] = [
-    {
-      id: "tli-burn",
-      label: "TLI Burn Window",
-      startTime: getTimelineTime(config, "tli", config.launchTime),
-      endTime: new Date(
-        getTimestampMs(getTimelineTime(config, "tli", config.launchTime)) + 45 * 60 * 1000
-      ).toISOString(),
-      deltaVms: 3150,
-      objective: "Commit Orion to translunar injection trajectory",
-    },
-    {
-      id: "midcourse-burn",
-      label: "Outbound Correction",
-      startTime: new Date(
-        getTimestampMs(getTimelineTime(config, "lunar-flyby", config.launchTime)) - 8 * 60 * 60 * 1000
-      ).toISOString(),
-      endTime: new Date(
-        getTimestampMs(getTimelineTime(config, "lunar-flyby", config.launchTime)) - 7 * 60 * 60 * 1000
-      ).toISOString(),
-      deltaVms: 26,
-      objective: "Refine closest approach geometry before lunar flyby",
-    },
-    {
-      id: "reentry-targeting",
-      label: "Reentry Targeting Burn",
-      startTime: new Date(
-        getTimestampMs(getTimelineTime(config, "reentry", config.plannedEndTime)) - 10 * 60 * 60 * 1000
-      ).toISOString(),
-      endTime: new Date(
-        getTimestampMs(getTimelineTime(config, "reentry", config.plannedEndTime)) - 9 * 60 * 60 * 1000
-      ).toISOString(),
-      deltaVms: 18,
-      objective: "Tighten the Earth return corridor and splashdown aim point",
-    },
-  ]
-
-  return windows.map((window) => {
-    const startMs = getTimestampMs(window.startTime)
-    const endMs = getTimestampMs(window.endTime)
-
-    let status: BurnWindow["status"] = "Upcoming"
-
-    if (currentTimeMs > endMs) {
-      status = "Completed"
-    } else if (currentTimeMs >= startMs && currentTimeMs <= endMs) {
-      status = "Active"
-    }
-
+  if (isoMatch) {
+    const [, timestamp, x, y, z, vx, vy, vz] = isoMatch
     return {
-      ...window,
-      status,
+      timestamp: normalizeTimestamp(timestamp),
+      position: { x: Number(x), y: Number(y), z: Number(z) },
+      velocity: { x: Number(vx), y: Number(vy), z: Number(vz) },
     }
+  }
+
+  const splitMatch = normalized.match(
+    /^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)\s+([-+0-9.Ee]+)$/
+  )
+
+  if (splitMatch) {
+    const [, datePart, timePart, x, y, z, vx, vy, vz] = splitMatch
+    return {
+      timestamp: normalizeTimestamp(`${datePart}T${timePart}`),
+      position: { x: Number(x), y: Number(y), z: Number(z) },
+      velocity: { x: Number(vx), y: Number(vy), z: Number(vz) },
+    }
+  }
+
+  return null
+}
+
+function parseEphemerisText(text: string): {
+  points: TrajectoryPoint[]
+  metadata: Record<string, string>
+} {
+  const points: TrajectoryPoint[] = []
+  const metadata: Record<string, string> = {}
+
+  let inMetaBlock = false
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    if (line === "META_START") {
+      inMetaBlock = true
+      continue
+    }
+
+    if (line === "META_STOP") {
+      inMetaBlock = false
+      continue
+    }
+
+    if (inMetaBlock && line.includes("=")) {
+      const [key, ...rest] = line.split("=")
+      metadata[key.trim()] = rest.join("=").trim()
+      continue
+    }
+
+    if (line.startsWith("COMMENT")) continue
+    if (line.startsWith("COVARIANCE")) break
+
+    const point = parseTrajectoryDataLine(line)
+    if (point) points.push(point)
+  }
+
+  return {
+    points: points.sort(
+      (a, b) => getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
+    ),
+    metadata,
+  }
+}
+
+function extractLatestEphemerisZipUrl(articleHtml: string): string {
+  const absoluteMatches = Array.from(
+    articleHtml.matchAll(
+      /https:\/\/www\.nasa\.gov\/wp-content\/uploads\/\d{4}\/\d{2}\/[^"'<> ]*artemis-ii[^"'<> ]*\.zip/gi
+    ),
+    (match) => match[0]
+  )
+
+  const relativeMatches = Array.from(
+    articleHtml.matchAll(
+      /\/wp-content\/uploads\/\d{4}\/\d{2}\/[^"'<> ]*artemis-ii[^"'<> ]*\.zip/gi
+    ),
+    (match) => `${NASA_BASE_URL}${match[0]}`
+  )
+
+  const urls = [...new Set([...absoluteMatches, ...relativeMatches])].sort(
+    (a, b) => a.localeCompare(b)
+  )
+
+  const latest = urls[urls.length - 1]
+
+  if (!latest) {
+    throw new Error("Could not find the Artemis II ephemeris ZIP on the NASA tracking page.")
+  }
+
+  return latest
+}
+
+async function fetchLatestEphemerisZipUrl(): Promise<string> {
+  const response = await fetch(NASA_TRACKING_ARTICLE_URL, {
+    next: { revalidate: SOURCE_REVALIDATE_SECONDS },
+    headers: { Accept: "text/html,application/xhtml+xml" },
   })
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch NASA tracking page: ${response.status}`)
+  }
+
+  const html = await response.text()
+  return extractLatestEphemerisZipUrl(html)
 }
 
-function deriveCommsStatus(
-  distanceFromEarthKm: number,
-  currentTimeMs: number
-): CommsStatus {
-  const stations: CommsStatus["station"][] = ["Goldstone", "Madrid", "Canberra"]
-  const stationIndex = Math.floor((currentTimeMs / (1000 * 60 * 90)) % stations.length)
-  const station = stations[stationIndex]
+async function fetchAndParseNasaEphemeris(): Promise<ParsedEphemeris> {
+  const ephemerisZipUrl = await fetchLatestEphemerisZipUrl()
 
-  const distanceRatio = Math.min(1, distanceFromEarthKm / 420000)
-  const oscillation = Math.sin(currentTimeMs / (1000 * 60 * 8)) * 1.8
-  const signalStrengthDb = -(74 + distanceRatio * 24) + oscillation
-  const roundTripLightTimeSeconds =
-    (2 * distanceFromEarthKm) / SPEED_OF_LIGHT_KM_PER_SECOND
-  const uplinkKbps = Math.max(4.5, 36 - distanceRatio * 22)
-  const downlinkMbps = Math.max(0.8, 12 - distanceRatio * 7.4)
+  const response = await fetch(ephemerisZipUrl, {
+    next: { revalidate: SOURCE_REVALIDATE_SECONDS },
+    headers: { Accept: "application/zip,*/*" },
+  })
 
-  let status: CommsStatus["status"] = "Nominal"
+  if (!response.ok) {
+    throw new Error(`Failed to fetch NASA ephemeris ZIP: ${response.status}`)
+  }
 
-  if (signalStrengthDb > -88) {
-    status = "High Gain Lock"
-  } else if (signalStrengthDb < -97) {
-    status = "Attenuated"
+  const zipBuffer = await response.arrayBuffer()
+  const zip = await JSZip.loadAsync(zipBuffer)
+
+  let best: ParsedEphemeris | null = null
+
+  for (const file of Object.values(zip.files)) {
+    if (file.dir) continue
+    if (!/\.(oem|txt|asc|ephem|eph|csv)$/i.test(file.name)) continue
+
+    const text = await file.async("text")
+    const parsed = parseEphemerisText(text)
+
+    if (parsed.points.length > 0 && (!best || parsed.points.length > best.points.length)) {
+      best = {
+        points: parsed.points,
+        metadata: parsed.metadata,
+        ephemerisZipUrl,
+      }
+    }
+  }
+
+  if (!best) {
+    throw new Error("No parseable trajectory file was found inside the NASA ephemeris ZIP.")
+  }
+
+  return best
+}
+
+function buildHorizonsCalendarValue(timestamp: string): string {
+  return timestamp.replace("T", " ").replace(/Z$/, "")
+}
+
+function buildMoonVectorsUrl(
+  startTime: string,
+  stopTime: string,
+  stepSize: string,
+  timeSystem: string
+): string {
+  const params = new URLSearchParams()
+
+  params.set("format", "json")
+  params.set("COMMAND", "'301'")
+  params.set("OBJ_DATA", "NO")
+  params.set("MAKE_EPHEM", "YES")
+  params.set("EPHEM_TYPE", "VECTORS")
+  params.set("CENTER", "'500@399'")
+  params.set("REF_SYSTEM", "'ICRF'")
+  params.set("REF_PLANE", "'FRAME'")
+  params.set("OUT_UNITS", "'KM-S'")
+  params.set("VEC_TABLE", "'2'")
+  params.set("VEC_CORR", "'NONE'")
+  params.set("CSV_FORMAT", "'YES'")
+  params.set("TIME_TYPE", `'${timeSystem}'`)
+  params.set("START_TIME", `'${buildHorizonsCalendarValue(startTime)}'`)
+  params.set("STOP_TIME", `'${buildHorizonsCalendarValue(stopTime)}'`)
+  params.set("STEP_SIZE", `'${stepSize}'`)
+
+  return `${JPL_HORIZONS_API_URL}?${params.toString()}`
+}
+
+function extractLinesBetweenMarkers(result: string): string[] {
+  const startMarker = "$$SOE"
+  const endMarker = "$$EOE"
+
+  const startIndex = result.indexOf(startMarker)
+  const endIndex = result.indexOf(endMarker)
+
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    throw new Error("Could not parse Horizons vector output.")
+  }
+
+  return result
+    .slice(startIndex + startMarker.length, endIndex)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+async function fetchMoonTrajectoryForRange(
+  startTime: string,
+  stopTime: string,
+  timeSystem: string
+): Promise<TrajectoryPoint[]> {
+  const url = buildMoonVectorsUrl(
+    startTime,
+    stopTime,
+    "30 m",
+    timeSystem === "TDB" ? "TDB" : "UT"
+  )
+
+  const response = await fetch(url, {
+    next: { revalidate: SOURCE_REVALIDATE_SECONDS },
+    headers: { Accept: "application/json" },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch JPL Horizons Moon vectors: ${response.status}`)
+  }
+
+  const data = (await response.json()) as {
+    result?: string
+    error?: string
+  }
+
+  if (data.error) {
+    throw new Error(`JPL Horizons error: ${data.error}`)
+  }
+
+  if (!data.result) {
+    throw new Error("JPL Horizons returned no result field.")
+  }
+
+  const lines = extractLinesBetweenMarkers(data.result)
+  const points: TrajectoryPoint[] = []
+
+  for (const line of lines) {
+    const values = line
+      .split(",")
+      .map((part) => part.trim())
+
+    if (values.length < 8) continue
+
+    const calendar = values[1]
+    const timestamp = normalizeTimestamp(calendar.replace(" ", "T"))
+    const numericValues = values
+      .slice(2)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+
+    if (numericValues.length < 6) continue
+
+    const [x, y, z, vx, vy, vz] = numericValues.slice(0, 6)
+
+    points.push({
+      timestamp,
+      position: { x, y, z },
+      velocity: { x: vx, y: vy, z: vz },
+    })
+  }
+
+  if (points.length === 0) {
+    throw new Error("No Moon vectors were parsed from JPL Horizons.")
+  }
+
+  return points.sort(
+    (a, b) => getTimestampMs(a.timestamp) - getTimestampMs(b.timestamp)
+  )
+}
+
+function getValidatedSourceMetadata(parsed: ParsedEphemeris): SourceMetadata {
+  const centerName =
+    parsed.metadata.CENTER_NAME ??
+    parsed.metadata.CENTER ??
+    "Earth"
+
+  const referenceFrame =
+    parsed.metadata.REF_FRAME ??
+    parsed.metadata.REF_SYSTEM ??
+    "ICRF"
+
+  const timeSystem =
+    (parsed.metadata.TIME_SYSTEM ?? "UT").toUpperCase()
+
+  if (!/EARTH|GEOCENTRIC|399/i.test(centerName)) {
+    throw new Error(
+      `Unsupported ephemeris center '${centerName}'. This build expects an Earth centered trajectory.`
+    )
   }
 
   return {
-    station,
-    signalStrengthDb,
-    roundTripLightTimeSeconds,
-    uplinkKbps,
-    downlinkMbps,
-    status,
+    trajectorySourceLabel: "NASA Artemis Real-Time Orbit Website ephemeris",
+    trajectorySourceUrl: NASA_TRACKING_ARTICLE_URL,
+    ephemerisZipUrl: parsed.ephemerisZipUrl,
+    moonSourceLabel: "JPL Horizons Moon vectors",
+    moonSourceUrl: JPL_HORIZONS_API_URL,
+    referenceFrame,
+    centerName,
+    timeSystem,
+    officialSampleCount: parsed.points.length,
+    officialEphemerisEndTime: parsed.points[parsed.points.length - 1].timestamp,
   }
 }
 
-function deriveClosestApproach(
-  futurePath: TrajectoryPoint[],
-  moonPosition: Vector3
-): ClosestApproachPrediction {
-  if (futurePath.length === 0) {
+const getCachedOfficialVectorBundle = unstable_cache(
+  async () => {
+    const parsed = await fetchAndParseNasaEphemeris()
+    const sourceMetadata = getValidatedSourceMetadata(parsed)
+
+    const startTime = parsed.points[0].timestamp
+    const stopTime = parsed.points[parsed.points.length - 1].timestamp
+
+    const moonTrajectory = await fetchMoonTrajectoryForRange(
+      startTime,
+      stopTime,
+      sourceMetadata.timeSystem
+    )
+
     return {
-      target: "Moon",
-      timestamp: new Date().toISOString(),
-      distanceKm: 0,
+      spacecraftTrajectory: parsed.points,
+      moonTrajectory,
+      sourceMetadata,
     }
-  }
-
-  let bestPoint = futurePath[0]
-  let smallestDistance = computeDistanceFromMoonKm(futurePath[0], moonPosition)
-
-  for (let i = 1; i < futurePath.length; i += 1) {
-    const candidateDistance = computeDistanceFromMoonKm(futurePath[i], moonPosition)
-    if (candidateDistance < smallestDistance) {
-      smallestDistance = candidateDistance
-      bestPoint = futurePath[i]
-    }
-  }
-
-  return {
-    target: "Moon",
-    timestamp: bestPoint.timestamp,
-    distanceKm: smallestDistance,
-  }
-}
-
-function deriveReentryCorridor(nominalTrajectory: TrajectoryPoint[]): ReentryCorridor {
-  if (nominalTrajectory.length < 2) {
-    return {
-      visible: false,
-      path: [],
-    }
-  }
-
-  const last = nominalTrajectory[nominalTrajectory.length - 1].position
-  const previous = nominalTrajectory[nominalTrajectory.length - 2].position
-
-  const dx = last.x - previous.x
-  const dy = last.y - previous.y
-  const length = Math.hypot(dx, dy) || 1
-
-  const normalX = -dy / length
-  const normalY = dx / length
-
-  return {
-    visible: true,
-    path: [
-      {
-        x: previous.x + normalX * 18000,
-        y: previous.y + normalY * 18000,
-        z: 0,
-      },
-      {
-        x: previous.x - normalX * 18000,
-        y: previous.y - normalY * 18000,
-        z: 0,
-      },
-      {
-        x: 15000 - normalX * 7000,
-        y: -14000 - normalY * 7000,
-        z: 0,
-      },
-      {
-        x: 15000 + normalX * 7000,
-        y: -14000 + normalY * 7000,
-        z: 0,
-      },
-    ],
-  }
-}
+  },
+  ["official-artemis-ii-vector-bundle"],
+  { revalidate: SOURCE_REVALIDATE_SECONDS }
+)
 
 export async function getLiveDashboardData(): Promise<DashboardData> {
-  const [config, nominalTrajectory, rawActualTrajectory] = await Promise.all([
+  const [config, vectorBundle] = await Promise.all([
     getMissionConfig(),
-    getNominalTrajectory(),
-    getActualTrajectory(),
+    getCachedOfficialVectorBundle(),
   ])
 
-  if (nominalTrajectory.length === 0 || rawActualTrajectory.length === 0) {
-    throw new Error("Trajectory data is empty.")
+  const { spacecraftTrajectory, moonTrajectory, sourceMetadata } = vectorBundle
+
+  if (spacecraftTrajectory.length === 0 || moonTrajectory.length === 0) {
+    throw new Error("Official trajectory data is empty.")
   }
 
-  const currentTimeMs = getDemoCurrentTimeMs(rawActualTrajectory)
-  const currentActualPoint = interpolateTrajectoryAtTime(rawActualTrajectory, currentTimeMs)
-  const actualPath = buildPathUntilTime(rawActualTrajectory, currentTimeMs)
+  const startMs = getTimestampMs(spacecraftTrajectory[0].timestamp)
+  const endMs = getTimestampMs(
+    spacecraftTrajectory[spacecraftTrajectory.length - 1].timestamp
+  )
+  const nowMs = Date.now()
+  const clampedNowMs = Math.min(Math.max(nowMs, startMs), endMs)
 
-  const predictionEndMs = Math.min(
-    currentTimeMs + PREDICTION_WINDOW_HOURS * 60 * 60 * 1000,
-    getTimestampMs(nominalTrajectory[nominalTrajectory.length - 1].timestamp)
+  const currentActualPoint = interpolateTrajectoryAtTime(
+    spacecraftTrajectory,
+    clampedNowMs
   )
 
-  const nominalPath = nominalTrajectory
-  const futureNominalSamples =
-    predictionEndMs > currentTimeMs
-      ? buildTrajectorySamplesBetween(
-          nominalTrajectory,
-          currentTimeMs,
-          predictionEndMs,
-          60 * 60 * 1000
-        )
-      : []
+  const currentMoonPoint = interpolateTrajectoryAtTime(
+    moonTrajectory,
+    clampedNowMs
+  ).position
 
-  const predictedPath =
-    futureNominalSamples.length > 0
-      ? [
-          currentActualPoint,
-          ...futureNominalSamples.slice(1).map((point) => ({
-            ...point,
-            velocity: point.velocity,
-          })),
-        ]
-      : [currentActualPoint]
+  const actualPath = buildPathUntilTime(spacecraftTrajectory, clampedNowMs)
+
+  const predictionEndMs = Math.min(
+    clampedNowMs + PREDICTION_WINDOW_HOURS * 60 * 60 * 1000,
+    endMs
+  )
+
+  const futurePath = buildTrajectorySamplesBetween(
+    spacecraftTrajectory,
+    clampedNowMs,
+    predictionEndMs,
+    30 * 60 * 1000
+  )
 
   const latestMetrics = computeMissionMetrics({
     point: currentActualPoint,
-    allActualPoints: [...actualPath, currentActualPoint],
-    nominalPoints: nominalTrajectory,
-    moonPosition: config.moonReferencePosition,
+    allActualPoints: actualPath,
+    currentMoonPoint,
     launchTime: config.launchTime,
-    plannedEndTime: config.plannedEndTime,
+    missionEndTime: spacecraftTrajectory[spacecraftTrajectory.length - 1].timestamp,
     timeline: config.timeline,
   })
 
-  const comms = deriveCommsStatus(latestMetrics.distanceFromEarthKm, currentTimeMs)
-  const burnWindows = getBurnWindows(config, currentTimeMs)
-  const nextClosestApproach = deriveClosestApproach(
-    predictedPath,
-    config.moonReferencePosition
+  const nextClosestApproachToMoon = computeClosestApproachToMoon(
+    futurePath,
+    moonTrajectory
   )
-  const reentryCorridor = deriveReentryCorridor(nominalTrajectory)
 
   return {
     config,
-    actualPath: [...actualPath, currentActualPoint],
-    nominalPath,
-    predictedPath,
+    actualPath,
+    futurePath,
     currentActualPoint,
+    currentMoonPoint,
     latestMetrics,
-    comms,
-    burnWindows,
-    nextClosestApproach,
-    reentryCorridor,
+    nextClosestApproachToMoon,
+    sourceMetadata,
     lastUpdated: new Date().toISOString(),
     refreshIntervalSeconds: REFRESH_INTERVAL_SECONDS,
   }

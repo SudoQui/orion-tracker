@@ -14,21 +14,13 @@ function StatCard({
   label,
   value,
   helper,
-  accent = "cyan",
 }: {
   label: string
   value: string
   helper: string
-  accent?: "cyan" | "emerald" | "amber"
 }) {
-  const accentMap = {
-    cyan: "border-cyan-400/15 bg-cyan-400/[0.04]",
-    emerald: "border-emerald-400/15 bg-emerald-400/[0.04]",
-    amber: "border-amber-400/15 bg-amber-400/[0.04]",
-  }
-
   return (
-    <div className={`rounded-2xl border p-4 ${accentMap[accent]}`}>
+    <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
       <p className="mt-1 text-sm text-slate-500">{helper}</p>
@@ -67,45 +59,37 @@ export default function MissionStats({ metrics }: MissionStatsProps) {
       <StatCard
         label="Speed"
         value={formatKmPerSec(metrics.speedKmPerSec)}
-        helper="Derived from the current velocity vector"
-        accent="emerald"
+        helper="Official current velocity magnitude"
       />
 
       <StatCard
         label="Distance from Earth"
         value={formatKm(metrics.distanceFromEarthKm)}
-        helper="Earth centered reference frame"
+        helper="From official Earth centered trajectory vectors"
       />
 
       <StatCard
         label="Distance from Moon"
         value={formatKm(metrics.distanceFromMoonKm)}
-        helper="Using the mission Moon reference vector"
+        helper="Computed using official JPL Moon vectors"
       />
 
       <StatCard
         label="Distance traveled"
         value={formatKm(metrics.cumulativeDistanceKm)}
-        helper="Cumulative length of the tracked path"
+        helper="Cumulative length of the flown path to now"
       />
 
       <StatCard
         label="Elapsed time"
         value={formatDuration(metrics.elapsedSeconds)}
-        helper="Time since the mission launch timestamp"
+        helper="Measured from official launch time"
       />
 
       <StatCard
         label="Time remaining"
         value={formatDuration(metrics.remainingSeconds)}
-        helper="Based on the planned mission end"
-      />
-
-      <StatCard
-        label="Off nominal"
-        value={formatKm(metrics.deviationFromNominalKm)}
-        helper="Nearest time comparison against the reference trajectory"
-        accent="amber"
+        helper="Based on the latest official ephemeris endpoint"
       />
     </div>
   )

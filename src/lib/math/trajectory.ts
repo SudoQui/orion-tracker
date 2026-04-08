@@ -1,4 +1,5 @@
 import type {
+  ClosestApproachSummary,
   MissionMetrics,
   MissionPhase,
   MissionTimelineEvent,
@@ -22,7 +23,7 @@ function subtract(a: Vector3, b: Vector3): Vector3 {
   }
 }
 
-function distance(a: Vector3, b: Vector3): number {
+export function distance(a: Vector3, b: Vector3): number {
   return magnitude(subtract(a, b))
 }
 
@@ -103,35 +104,15 @@ export function buildPathUntilTime(
 ): TrajectoryPoint[] {
   if (points.length === 0) return []
 
-  const firstTime = getTimestampMs(points[0].timestamp)
-  const lastTime = getTimestampMs(points[points.length - 1].timestamp)
+  const result = points.filter(
+    (point) => getTimestampMs(point.timestamp) < targetMs
+  )
 
-  if (targetMs <= firstTime) {
-    return [interpolateTrajectoryAtTime(points, targetMs)]
-  }
+  const interpolated = interpolateTrajectoryAtTime(points, targetMs)
+  const last = result[result.length - 1]
 
-  if (targetMs >= lastTime) {
-    return [...points]
-  }
-
-  const result: TrajectoryPoint[] = []
-
-  for (let i = 0; i < points.length; i += 1) {
-    const current = points[i]
-    const currentTime = getTimestampMs(current.timestamp)
-
-    if (currentTime < targetMs) {
-      result.push(current)
-      continue
-    }
-
-    if (currentTime === targetMs) {
-      result.push(current)
-      return result
-    }
-
-    result.push(interpolateTrajectoryAtTime(points, targetMs))
-    return result
+  if (!last || getTimestampMs(last.timestamp) !== targetMs) {
+    result.push(interpolated)
   }
 
   return result
@@ -201,57 +182,26 @@ export function computeElapsedSeconds(
 
 export function computeRemainingSeconds(
   currentTimestamp: string,
-  plannedEndTime: string
+  missionEndTime: string
 ): number {
   return Math.max(
     0,
-    (getTimestampMs(plannedEndTime) - getTimestampMs(currentTimestamp)) / 1000
+    (getTimestampMs(missionEndTime) - getTimestampMs(currentTimestamp)) / 1000
   )
 }
 
 export function computeProgressPercent(
   currentTimestamp: string,
   launchTime: string,
-  plannedEndTime: string
+  missionEndTime: string
 ): number {
   const total =
-    (getTimestampMs(plannedEndTime) - getTimestampMs(launchTime)) / 1000
+    (getTimestampMs(missionEndTime) - getTimestampMs(launchTime)) / 1000
 
   if (total <= 0) return 0
 
   const elapsed = computeElapsedSeconds(currentTimestamp, launchTime)
   return Math.min(100, Math.max(0, (elapsed / total) * 100))
-}
-
-export function findClosestNominalPoint(
-  actualPoint: TrajectoryPoint,
-  nominalPoints: TrajectoryPoint[]
-): TrajectoryPoint | null {
-  if (nominalPoints.length === 0) return null
-
-  const actualTime = getTimestampMs(actualPoint.timestamp)
-
-  let bestPoint = nominalPoints[0]
-  let smallestTimeDelta = Math.abs(getTimestampMs(nominalPoints[0].timestamp) - actualTime)
-
-  for (let i = 1; i < nominalPoints.length; i += 1) {
-    const delta = Math.abs(getTimestampMs(nominalPoints[i].timestamp) - actualTime)
-    if (delta < smallestTimeDelta) {
-      smallestTimeDelta = delta
-      bestPoint = nominalPoints[i]
-    }
-  }
-
-  return bestPoint
-}
-
-export function computeDeviationFromNominalKm(
-  actualPoint: TrajectoryPoint,
-  nominalPoints: TrajectoryPoint[]
-): number {
-  const reference = findClosestNominalPoint(actualPoint, nominalPoints)
-  if (!reference) return 0
-  return distance(actualPoint.position, reference.position)
 }
 
 export function getMissionPhase(
@@ -262,10 +212,19 @@ export function getMissionPhase(
 
   let phase: MissionPhase = "Launch"
 
-  for (const event of timeline) {
-    const eventTime = getTimestampMs(event.timestamp)
-    if (currentTime >= eventTime) {
-      phase = event.phase
+  for (let i = 0; i < timeline.length; i += 1) {
+    const currentEventTime = getTimestampMs(timeline[i].timestamp)
+    const nextEventTime =
+      i < timeline.length - 1
+        ? getTimestampMs(timeline[i + 1].timestamp)
+        : Number.POSITIVE_INFINITY
+
+    if (currentTime >= currentEventTime && currentTime < nextEventTime) {
+      return timeline[i].phase
+    }
+
+    if (currentTime >= currentEventTime) {
+      phase = timeline[i].phase
     }
   }
 
@@ -275,19 +234,17 @@ export function getMissionPhase(
 export function computeMissionMetrics(args: {
   point: TrajectoryPoint
   allActualPoints: TrajectoryPoint[]
-  nominalPoints: TrajectoryPoint[]
-  moonPosition: Vector3
+  currentMoonPoint: Vector3
   launchTime: string
-  plannedEndTime: string
+  missionEndTime: string
   timeline: MissionTimelineEvent[]
 }): MissionMetrics {
   const {
     point,
     allActualPoints,
-    nominalPoints,
-    moonPosition,
+    currentMoonPoint,
     launchTime,
-    plannedEndTime,
+    missionEndTime,
     timeline,
   } = args
 
@@ -295,16 +252,57 @@ export function computeMissionMetrics(args: {
     timestamp: point.timestamp,
     speedKmPerSec: computeSpeedKmPerSec(point),
     distanceFromEarthKm: computeDistanceFromEarthKm(point),
-    distanceFromMoonKm: computeDistanceFromMoonKm(point, moonPosition),
+    distanceFromMoonKm: computeDistanceFromMoonKm(point, currentMoonPoint),
     cumulativeDistanceKm: computeCumulativeDistanceKm(allActualPoints),
     elapsedSeconds: computeElapsedSeconds(point.timestamp, launchTime),
-    remainingSeconds: computeRemainingSeconds(point.timestamp, plannedEndTime),
+    remainingSeconds: computeRemainingSeconds(point.timestamp, missionEndTime),
     progressPercent: computeProgressPercent(
       point.timestamp,
       launchTime,
-      plannedEndTime
+      missionEndTime
     ),
-    deviationFromNominalKm: computeDeviationFromNominalKm(point, nominalPoints),
     missionPhase: getMissionPhase(point.timestamp, timeline),
+  }
+}
+
+export function computeClosestApproachToMoon(
+  futurePath: TrajectoryPoint[],
+  moonTrajectory: TrajectoryPoint[]
+): ClosestApproachSummary {
+  if (futurePath.length === 0) {
+    return {
+      timestamp: new Date().toISOString(),
+      distanceKm: 0,
+    }
+  }
+
+  let bestPoint = futurePath[0]
+  let bestMoonPoint = interpolateTrajectoryAtTime(
+    moonTrajectory,
+    getTimestampMs(futurePath[0].timestamp)
+  )
+
+  let smallestDistance = computeDistanceFromMoonKm(bestPoint, bestMoonPoint.position)
+
+  for (let i = 1; i < futurePath.length; i += 1) {
+    const moonPoint = interpolateTrajectoryAtTime(
+      moonTrajectory,
+      getTimestampMs(futurePath[i].timestamp)
+    )
+    const candidateDistance = computeDistanceFromMoonKm(
+      futurePath[i],
+      moonPoint.position
+    )
+
+    if (candidateDistance < smallestDistance) {
+      smallestDistance = candidateDistance
+      bestPoint = futurePath[i]
+      bestMoonPoint = moonPoint
+    }
+  }
+
+  return {
+    timestamp: bestPoint.timestamp,
+    distanceKm: smallestDistance,
   }
 }

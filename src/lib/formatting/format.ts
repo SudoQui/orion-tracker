@@ -40,19 +40,3 @@ export function formatTimestamp(timestamp: string): string {
     timeStyle: "short",
   })
 }
-
-export function formatDb(value: number): string {
-  return `${formatNumber(value, 1)} dB`
-}
-
-export function formatSeconds(value: number): string {
-  return `${formatNumber(value, 2)} s`
-}
-
-export function formatKbps(value: number): string {
-  return `${formatNumber(value, 1)} kbps`
-}
-
-export function formatMbps(value: number): string {
-  return `${formatNumber(value, 2)} Mbps`
-}

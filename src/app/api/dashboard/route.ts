@@ -16,7 +16,7 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json(
       {
-        message: "Failed to build dashboard payload.",
+        message: "Failed to build official dashboard payload.",
         error: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }

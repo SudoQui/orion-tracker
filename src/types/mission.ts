@@ -1,11 +1,9 @@
 import type {
-  BurnWindow,
-  ClosestApproachPrediction,
-  CommsStatus,
+  ClosestApproachSummary,
   MissionMetrics,
   MissionTimelineEvent,
-  ReentryCorridor,
   TrajectoryPoint,
+  Vector3,
 } from "@/types/trajectory"
 
 export type MissionConfig = {
@@ -15,25 +13,31 @@ export type MissionConfig = {
   plannedEndTime: string
   earthRadiusKm: number
   moonRadiusKm: number
-  moonReferencePosition: {
-    x: number
-    y: number
-    z: number
-  }
   timeline: MissionTimelineEvent[]
+}
+
+export type SourceMetadata = {
+  trajectorySourceLabel: string
+  trajectorySourceUrl: string
+  ephemerisZipUrl: string
+  moonSourceLabel: string
+  moonSourceUrl: string
+  referenceFrame: string
+  centerName: string
+  timeSystem: string
+  officialSampleCount: number
+  officialEphemerisEndTime: string
 }
 
 export type DashboardData = {
   config: MissionConfig
   actualPath: TrajectoryPoint[]
-  nominalPath: TrajectoryPoint[]
-  predictedPath: TrajectoryPoint[]
+  futurePath: TrajectoryPoint[]
   currentActualPoint: TrajectoryPoint
+  currentMoonPoint: Vector3
   latestMetrics: MissionMetrics
-  comms: CommsStatus
-  burnWindows: BurnWindow[]
-  nextClosestApproach: ClosestApproachPrediction
-  reentryCorridor: ReentryCorridor
+  nextClosestApproachToMoon: ClosestApproachSummary
+  sourceMetadata: SourceMetadata
   lastUpdated: string
   refreshIntervalSeconds: number
 }

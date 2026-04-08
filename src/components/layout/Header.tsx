@@ -58,9 +58,9 @@ export default function Header({
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-4">
           <img
-            src="/logo.png"
+            src="/images/logo.png"
             alt="Sudo Tech logo"
-            className="h-14 w-14 rounded-2xl border border-white/10 bg-slate-900/60 object-contain p-2 shadow-lg"
+            className="h-16 w-16 rounded-2xl border border-white/10 bg-slate-900/60 object-contain p-2 shadow-lg"
             onError={(event) => {
               event.currentTarget.style.display = "none"
             }}
