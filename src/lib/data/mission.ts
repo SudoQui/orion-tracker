@@ -11,13 +11,14 @@ import type {
 } from "@/types/mission"
 import type { TrajectoryPoint } from "@/types/trajectory"
 import {
-  buildPathUntilTime,
   buildTrajectorySamplesBetween,
+  computeDistanceFromMoonKm,
   computeClosestApproachToMoon,
   computeMissionMetrics,
   getTimestampMs,
   interpolateTrajectoryAtTime,
 } from "@/lib/math/trajectory"
+import type { Vector3 } from "@/types/trajectory"
 
 const NASA_TRACKING_ARTICLE_URL =
   "https://www.nasa.gov/missions/artemis/artemis-2/track-nasas-artemis-ii-mission-in-real-time/"
@@ -26,13 +27,14 @@ const JPL_HORIZONS_API_URL = "https://ssd.jpl.nasa.gov/api/horizons.api"
 
 const REFRESH_INTERVAL_SECONDS = 5
 const SOURCE_REVALIDATE_SECONDS = 300
-const PREDICTION_WINDOW_HOURS = 24
 
 type ParsedEphemeris = {
   points: TrajectoryPoint[]
   metadata: Record<string, string>
   ephemerisZipUrl: string
 }
+
+const TRAJECTORY_SAMPLE_STEP_MS = 30 * 60 * 1000
 
 async function readJsonFile<T>(relativePath: string): Promise<T> {
   const filePath = path.join(process.cwd(), "public", relativePath)
@@ -42,6 +44,18 @@ async function readJsonFile<T>(relativePath: string): Promise<T> {
 
 async function getMissionConfig(): Promise<MissionConfig> {
   return readJsonFile<MissionConfig>(path.join("data", "mission-config.json"))
+}
+
+async function getNominalTrajectory(): Promise<TrajectoryPoint[]> {
+  return readJsonFile<TrajectoryPoint[]>(path.join("data", "nominal-trajectory.json"))
+}
+
+async function getActualTrajectory(): Promise<TrajectoryPoint[]> {
+  return readJsonFile<TrajectoryPoint[]>(path.join("data", "actual-trajectory.json"))
+}
+
+function getStaticMoonReferencePoint(): Vector3 {
+  return { x: 384400, y: 0, z: 0 }
 }
 
 function normalizeTimestamp(raw: string): string {
@@ -386,26 +400,164 @@ const getCachedOfficialVectorBundle = unstable_cache(
 )
 
 export async function getLiveDashboardData(): Promise<DashboardData> {
-  const [config, vectorBundle] = await Promise.all([
+  const [config, nominalTrajectory] = await Promise.all([
     getMissionConfig(),
-    getCachedOfficialVectorBundle(),
+    getNominalTrajectory(),
   ])
+
+  const sampleRange = (
+    points: TrajectoryPoint[],
+    startMs: number,
+    endMs: number
+  ): TrajectoryPoint[] => {
+    if (endMs <= startMs) return []
+    return buildTrajectorySamplesBetween(
+      points,
+      startMs,
+      endMs,
+      TRAJECTORY_SAMPLE_STEP_MS
+    )
+  }
+
+  let vectorBundle: Awaited<ReturnType<typeof getCachedOfficialVectorBundle>>
+  try {
+    vectorBundle = await getCachedOfficialVectorBundle()
+  } catch {
+    const actualTrajectory = await getActualTrajectory()
+
+    if (actualTrajectory.length === 0 || nominalTrajectory.length === 0) {
+      throw new Error("No fallback trajectory data is available.")
+    }
+
+    const missionStartMs = getTimestampMs(config.launchTime)
+    const missionEndMs = getTimestampMs(config.plannedEndTime)
+    const nowMs = Date.now()
+    const clampedNowMs = Math.min(Math.max(nowMs, missionStartMs), missionEndMs)
+
+    const actualPath = sampleRange(actualTrajectory, missionStartMs, clampedNowMs)
+    const futurePath = sampleRange(nominalTrajectory, clampedNowMs, missionEndMs)
+    const currentActualPoint = interpolateTrajectoryAtTime(actualTrajectory, clampedNowMs)
+    const currentMoonPoint = getStaticMoonReferencePoint()
+
+    const fallbackMoonTrajectory: TrajectoryPoint[] = [
+      { timestamp: config.launchTime, position: currentMoonPoint },
+      { timestamp: config.plannedEndTime, position: currentMoonPoint },
+    ]
+
+    const nextClosestApproachToMoon = futurePath.reduce(
+      (best, point) => {
+        const distanceKm = computeDistanceFromMoonKm(point, currentMoonPoint)
+        if (distanceKm < best.distanceKm) {
+          return { timestamp: point.timestamp, distanceKm }
+        }
+        return best
+      },
+      {
+        timestamp: currentActualPoint.timestamp,
+        distanceKm: computeDistanceFromMoonKm(currentActualPoint, currentMoonPoint),
+      }
+    )
+
+    const latestMetrics = computeMissionMetrics({
+      point: currentActualPoint,
+      allActualPoints: actualPath,
+      currentMoonPoint,
+      launchTime: config.launchTime,
+      missionEndTime: config.plannedEndTime,
+      timeline: config.timeline,
+    })
+
+    return {
+      config,
+      actualPath,
+      futurePath,
+      moonPath: fallbackMoonTrajectory,
+      currentActualPoint,
+      currentMoonPoint,
+      latestMetrics,
+      nextClosestApproachToMoon,
+      sourceMetadata: {
+        trajectorySourceLabel: "Local fallback trajectory (network unavailable)",
+        trajectorySourceUrl: "/public/data/actual-trajectory.json",
+        ephemerisZipUrl: "/public/data/nominal-trajectory.json",
+        moonSourceLabel: "Static Moon reference",
+        moonSourceUrl: "",
+        referenceFrame: "ICRF",
+        centerName: "EARTH",
+        timeSystem: "UTC",
+        officialSampleCount: actualTrajectory.length,
+        officialEphemerisEndTime: nominalTrajectory[nominalTrajectory.length - 1].timestamp,
+      },
+      lastUpdated: new Date().toISOString(),
+      refreshIntervalSeconds: REFRESH_INTERVAL_SECONDS,
+    }
+  }
 
   const { spacecraftTrajectory, moonTrajectory, sourceMetadata } = vectorBundle
 
-  if (spacecraftTrajectory.length === 0 || moonTrajectory.length === 0) {
+  if (
+    spacecraftTrajectory.length === 0 ||
+    moonTrajectory.length === 0 ||
+    nominalTrajectory.length === 0
+  ) {
     throw new Error("Official trajectory data is empty.")
   }
 
-  const startMs = getTimestampMs(spacecraftTrajectory[0].timestamp)
-  const endMs = getTimestampMs(
+  const missionStartMs = getTimestampMs(config.launchTime)
+  const missionEndMs = getTimestampMs(config.plannedEndTime)
+  const officialStartMs = getTimestampMs(spacecraftTrajectory[0].timestamp)
+  const officialEndMs = getTimestampMs(
     spacecraftTrajectory[spacecraftTrajectory.length - 1].timestamp
   )
+  const moonStartMs = getTimestampMs(moonTrajectory[0].timestamp)
+  const moonEndMs = getTimestampMs(moonTrajectory[moonTrajectory.length - 1].timestamp)
   const nowMs = Date.now()
-  const clampedNowMs = Math.min(Math.max(nowMs, startMs), endMs)
+  const clampedNowMs = Math.min(Math.max(nowMs, missionStartMs), missionEndMs)
+
+  const actualPath = [
+    ...sampleRange(
+      nominalTrajectory,
+      missionStartMs,
+      Math.min(clampedNowMs, officialStartMs)
+    ),
+    ...sampleRange(
+      spacecraftTrajectory,
+      Math.max(missionStartMs, officialStartMs),
+      Math.min(clampedNowMs, officialEndMs)
+    ),
+    ...sampleRange(
+      nominalTrajectory,
+      Math.max(missionStartMs, officialEndMs),
+      Math.min(clampedNowMs, missionEndMs)
+    ),
+  ].filter((point, index, array) => {
+    if (index === 0) return true
+    return point.timestamp !== array[index - 1].timestamp
+  })
+
+  const futurePath = [
+    ...sampleRange(
+      spacecraftTrajectory,
+      clampedNowMs,
+      Math.min(missionEndMs, officialEndMs)
+    ),
+    ...sampleRange(
+      nominalTrajectory,
+      Math.max(clampedNowMs, officialEndMs),
+      missionEndMs
+    ),
+  ].filter((point, index, array) => {
+    if (index === 0) return true
+    return point.timestamp !== array[index - 1].timestamp
+  })
+
+  const trajectoryForCurrentPoint =
+    clampedNowMs >= officialStartMs && clampedNowMs <= officialEndMs
+      ? spacecraftTrajectory
+      : nominalTrajectory
 
   const currentActualPoint = interpolateTrajectoryAtTime(
-    spacecraftTrajectory,
+    trajectoryForCurrentPoint,
     clampedNowMs
   )
 
@@ -414,18 +566,10 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
     clampedNowMs
   ).position
 
-  const actualPath = buildPathUntilTime(spacecraftTrajectory, clampedNowMs)
-
-  const predictionEndMs = Math.min(
-    clampedNowMs + PREDICTION_WINDOW_HOURS * 60 * 60 * 1000,
-    endMs
-  )
-
-  const futurePath = buildTrajectorySamplesBetween(
-    spacecraftTrajectory,
-    clampedNowMs,
-    predictionEndMs,
-    30 * 60 * 1000
+  const moonPath = sampleRange(
+    moonTrajectory,
+    Math.max(missionStartMs, moonStartMs),
+    Math.min(missionEndMs, moonEndMs)
   )
 
   const latestMetrics = computeMissionMetrics({
@@ -446,6 +590,7 @@ export async function getLiveDashboardData(): Promise<DashboardData> {
     config,
     actualPath,
     futurePath,
+    moonPath,
     currentActualPoint,
     currentMoonPoint,
     latestMetrics,

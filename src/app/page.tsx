@@ -57,7 +57,7 @@ export default function HomePage() {
     }
   }, [])
 
-  if (!data) {
+  if (!data && !error) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
         <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
@@ -65,6 +65,21 @@ export default function HomePage() {
           <p className="mt-4 text-lg font-medium">Booting OrionTracker accuracy mode...</p>
           <p className="mt-2 text-sm text-slate-400">
             Pulling official NASA and JPL vectors
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  if (!data && error) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+        <div className="max-w-xl rounded-3xl border border-rose-400/20 bg-rose-500/10 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
+          <p className="text-lg font-semibold text-rose-200">Dashboard failed to load</p>
+          <p className="mt-2 text-sm text-rose-100/80">{error}</p>
+          <p className="mt-4 text-xs text-rose-100/70">
+            The service could not fetch the latest trajectory payload. Please retry in a
+            few seconds.
           </p>
         </div>
       </main>
@@ -102,6 +117,7 @@ export default function HomePage() {
             <OrbitView
               actualTrajectory={data.actualPath}
               futureTrajectory={data.futurePath}
+              moonTrajectory={data.moonPath}
               currentMoonPosition={data.currentMoonPoint}
               currentTimestamp={data.currentActualPoint.timestamp}
             />
