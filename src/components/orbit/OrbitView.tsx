@@ -1,3 +1,5 @@
+import { useMemo } from "react"
+
 import type { TrajectoryPoint, Vector3 } from "@/types/trajectory"
 import { formatTimestamp } from "@/lib/formatting/format"
 
@@ -7,7 +9,6 @@ type OrbitViewProps = {
   moonActualPath: TrajectoryPoint[]
   moonFuturePath: TrajectoryPoint[]
   currentMoonPosition: Vector3
-  flownClosestApproachMoonPosition: Vector3
   currentTimestamp: string
 }
 
@@ -78,57 +79,74 @@ function pathFromTrajectory(
     .join(" ")
 }
 
-function getTrajectoryProgressPoint(
-  points: TrajectoryPoint[],
-  project: (point: Vector3) => Point2D,
-  progress: number
-): Point2D | null {
-  if (points.length === 0) return null
-
-  const projectedPoints = points.map((point) =>
-    project(rotateClockwise90(point.position))
+function mergeTrajectorySegments(
+  primary: TrajectoryPoint[],
+  secondary: TrajectoryPoint[]
+): TrajectoryPoint[] {
+  const merged = [...primary, ...secondary].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
   )
+  const deduped = new Map<string, TrajectoryPoint>()
 
-  if (projectedPoints.length === 1) return projectedPoints[0]
-
-  const clampedProgress = Math.min(Math.max(progress, 0), 1)
-  const segmentLengths: number[] = []
-  let totalLength = 0
-
-  for (let index = 0; index < projectedPoints.length - 1; index += 1) {
-    const start = projectedPoints[index]
-    const end = projectedPoints[index + 1]
-    const segmentLength = Math.hypot(end.x - start.x, end.y - start.y)
-    segmentLengths.push(segmentLength)
-    totalLength += segmentLength
-  }
-
-  if (totalLength === 0) return projectedPoints[0]
-
-  const targetDistance = totalLength * clampedProgress
-  let traversedDistance = 0
-
-  for (let index = 0; index < segmentLengths.length; index += 1) {
-    const segmentLength = segmentLengths[index]
-
-    if (traversedDistance + segmentLength >= targetDistance) {
-      const start = projectedPoints[index]
-      const end = projectedPoints[index + 1]
-      const segmentProgress =
-        segmentLength === 0
-          ? 0
-          : (targetDistance - traversedDistance) / segmentLength
-
-      return {
-        x: start.x + (end.x - start.x) * segmentProgress,
-        y: start.y + (end.y - start.y) * segmentProgress,
-      }
+  for (const point of merged) {
+    if (!deduped.has(point.timestamp)) {
+      deduped.set(point.timestamp, point)
     }
-
-    traversedDistance += segmentLength
   }
 
-  return projectedPoints[projectedPoints.length - 1]
+  return [...deduped.values()]
+}
+
+function computeMedian(values: number[]): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2
+  }
+
+  return sorted[mid]
+}
+
+function getEarthDepartureSegment(
+  points: TrajectoryPoint[],
+  departureRadiusKm = 120000
+): TrajectoryPoint[] {
+  if (points.length === 0) return []
+
+  const segment: TrajectoryPoint[] = []
+
+  for (const point of points) {
+    segment.push(point)
+
+    const distanceFromEarth = Math.hypot(point.position.x, point.position.y)
+    if (segment.length > 8 && distanceFromEarth > departureRadiusKm) {
+      break
+    }
+  }
+
+  return segment
+}
+
+function computeEarthRounds(points: TrajectoryPoint[]): number {
+  if (points.length < 2) return 0
+
+  let totalAngleChange = 0
+  let previousAngle = Math.atan2(points[0].position.y, points[0].position.x)
+
+  for (let index = 1; index < points.length; index += 1) {
+    const currentAngle = Math.atan2(points[index].position.y, points[index].position.x)
+    let delta = currentAngle - previousAngle
+
+    while (delta > Math.PI) delta -= Math.PI * 2
+    while (delta < -Math.PI) delta += Math.PI * 2
+
+    totalAngleChange += delta
+    previousAngle = currentAngle
+  }
+
+  return Math.abs(totalAngleChange) / (Math.PI * 2)
 }
 
 export default function OrbitView({
@@ -137,54 +155,82 @@ export default function OrbitView({
   moonActualPath,
   moonFuturePath,
   currentMoonPosition,
-  flownClosestApproachMoonPosition,
   currentTimestamp,
 }: OrbitViewProps) {
-  const rotatedEarth = rotateClockwise90({ x: 0, y: 0, z: 0 })
-  const rotatedCurrentMoon = rotateClockwise90(currentMoonPosition)
-  const rotatedFlybyMoon = rotateClockwise90(flownClosestApproachMoonPosition)
+  const fullOrionTrajectory = useMemo(
+    () => mergeTrajectorySegments(actualTrajectory, futureTrajectory),
+    [actualTrajectory, futureTrajectory]
+  )
+  const fullMoonTrajectory = useMemo(
+    () => mergeTrajectorySegments(moonActualPath, moonFuturePath),
+    [moonActualPath, moonFuturePath]
+  )
+  const departureSegment = useMemo(
+    () => getEarthDepartureSegment(fullOrionTrajectory),
+    [fullOrionTrajectory]
+  )
+  const earthRounds = useMemo(
+    () => computeEarthRounds(departureSegment),
+    [departureSegment]
+  )
 
-  const rotatedVectors = [
-    ...actualTrajectory.map((point) => rotateClockwise90(point.position)),
-    ...futureTrajectory.map((point) => rotateClockwise90(point.position)),
-    ...moonActualPath.map((point) => rotateClockwise90(point.position)),
-    ...moonFuturePath.map((point) => rotateClockwise90(point.position)),
-    rotatedCurrentMoon,
-    rotatedFlybyMoon,
-    rotatedEarth,
-  ]
+  const rotatedEarth = useMemo(() => rotateClockwise90({ x: 0, y: 0, z: 0 }), [])
+  const rotatedCurrentMoon = useMemo(
+    () => rotateClockwise90(currentMoonPosition),
+    [currentMoonPosition]
+  )
+  const rotatedVectors = useMemo(
+    () => [
+      ...fullOrionTrajectory.map((point) => rotateClockwise90(point.position)),
+      ...fullMoonTrajectory.map((point) => rotateClockwise90(point.position)),
+      rotatedCurrentMoon,
+      rotatedEarth,
+    ],
+    [fullOrionTrajectory, fullMoonTrajectory, rotatedCurrentMoon, rotatedEarth]
+  )
+  const project = useMemo(() => createProjector(rotatedVectors), [rotatedVectors])
 
-  const project = createProjector(rotatedVectors)
-
-  const actualPath = pathFromTrajectory(actualTrajectory, project)
-  const futurePath = pathFromTrajectory(futureTrajectory, project)
-  const moonActualSvgPath = pathFromTrajectory(moonActualPath, project)
-  const moonFutureSvgPath = pathFromTrajectory(moonFuturePath, project)
+  const actualPath = useMemo(
+    () => pathFromTrajectory(actualTrajectory, project),
+    [actualTrajectory, project]
+  )
+  const futurePath = useMemo(
+    () => pathFromTrajectory(futureTrajectory, project),
+    [futureTrajectory, project]
+  )
+  const moonActualSvgPath = useMemo(
+    () => pathFromTrajectory(moonActualPath, project),
+    [moonActualPath, project]
+  )
+  const moonFutureSvgPath = useMemo(
+    () => pathFromTrajectory(moonFuturePath, project),
+    [moonFuturePath, project]
+  )
+  const departurePath = useMemo(
+    () => pathFromTrajectory(departureSegment, project),
+    [departureSegment, project]
+  )
 
   const earthPoint = project(rotatedEarth)
   const moonPoint = project(rotatedCurrentMoon)
-  const flybyMoonPoint = project(rotatedFlybyMoon)
-  const currentPoint = project(
-    rotateClockwise90(actualTrajectory[actualTrajectory.length - 1].position)
+  const currentTrajectoryPoint =
+    actualTrajectory[actualTrajectory.length - 1] ??
+    fullOrionTrajectory[fullOrionTrajectory.length - 1] ?? {
+      timestamp: currentTimestamp,
+      position: { x: 0, y: 0, z: 0 },
+    }
+  const currentPoint = project(rotateClockwise90(currentTrajectoryPoint.position))
+
+  const moonOrbitRadius = computeMedian(
+    fullMoonTrajectory.map((point) => {
+      const projectedPoint = project(rotateClockwise90(point.position))
+      return Math.hypot(projectedPoint.x - earthPoint.x, projectedPoint.y - earthPoint.y)
+    })
   )
-  const halfOrbitPoint = getTrajectoryProgressPoint(actualTrajectory, project, 0.5)
-  const midpointMoonSize = 100
-  // Manual adjustment knobs for the midpoint moon marker position.
-  const midpointMoonOffsetX = -550
-  const midpointMoonOffsetY = -150
+
   const earthSize = 184 * PLANET_SCALE
   const moonSize = 124 * PLANET_SCALE
-  const flybyMoonSize = 108 * PLANET_SCALE
-  const moonOrbitRadius =
-    (Math.hypot(moonPoint.x - earthPoint.x, moonPoint.y - earthPoint.y) +
-      Math.hypot(
-        flybyMoonPoint.x - earthPoint.x,
-        flybyMoonPoint.y - earthPoint.y
-      )) /
-    2
-  const legendScale = 1
-  const legendX = 36
-  const legendY = (VIEWBOX_HEIGHT - 215 * legendScale) / 2
+  const rocketSize = 112
 
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/80 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
@@ -192,6 +238,7 @@ export default function OrbitView({
         <div>
           <h2 className="text-xl font-semibold text-white">Mission map</h2>
           <p className="mt-1 text-sm text-slate-400">
+            Earth-centered inertial replay
           </p>
         </div>
 
@@ -259,6 +306,15 @@ export default function OrbitView({
           />
 
           <path
+            d={departurePath}
+            fill="none"
+            stroke="rgba(250,204,21,0.7)"
+            strokeWidth="4"
+            strokeDasharray="8 7"
+            strokeLinecap="round"
+          />
+
+          <path
             d={moonActualSvgPath}
             fill="none"
             stroke="rgba(229,231,235,0.55)"
@@ -293,18 +349,6 @@ export default function OrbitView({
             opacity="0.95"
           />
 
-          {halfOrbitPoint ? (
-            <image
-              href="/images/moon.svg"
-              x={halfOrbitPoint.x + midpointMoonOffsetX}
-              y={halfOrbitPoint.y + midpointMoonOffsetY}
-              width={midpointMoonSize}
-              height={midpointMoonSize}
-              preserveAspectRatio="xMidYMid meet"
-              opacity="0.5"
-            />
-          ) : null}
-
           <image
             href="/images/earth.svg"
             x={earthPoint.x - earthSize / 2}
@@ -324,35 +368,13 @@ export default function OrbitView({
           />
 
           <image
-            href="/images/moon.svg"
-            x={flybyMoonPoint.x - flybyMoonSize / 2}
-            y={flybyMoonPoint.y - flybyMoonSize / 2}
-            width={flybyMoonSize}
-            height={flybyMoonSize}
-            preserveAspectRatio="xMidYMid meet"
-            opacity="0.38"
-          />
-
-          <image
             href="/images/orion.svg"
-            x={currentPoint.x - 34}
-            y={currentPoint.y - 34}
-            width="118"
-            height="118"
+            x={currentPoint.x - rocketSize / 2}
+            y={currentPoint.y - rocketSize / 2}
+            width={rocketSize}
+            height={rocketSize}
             preserveAspectRatio="xMidYMid meet"
           />
-
-          
-
-          <text
-            x={flybyMoonPoint.x + 16}
-            y={flybyMoonPoint.y - 14}
-            fill="#facc15"
-            fontSize="18"
-            fontFamily="sans-serif"
-            fontWeight="700"
-          >
-          </text>
 
           <text
             x={earthPoint.x - 35}
@@ -373,7 +395,7 @@ export default function OrbitView({
             fontFamily="sans-serif"
             fontWeight="700"
           >
-            MOON NOW
+            MOON
           </text>
 
           <text
@@ -387,81 +409,16 @@ export default function OrbitView({
             ORION
           </text>
 
-          <g transform={`translate(${legendX}, ${legendY}) scale(${legendScale})`}>
-            <rect
-              width="520"
-              height="215"
-              rx="22"
-              fill="rgba(2, 6, 23, 0.78)"
-              stroke="rgba(255,255,255,0.12)"
-            />
-
-            <line
-              x1="22"
-              y1="34"
-              x2="88"
-              y2="34"
-              stroke="url(#actualStroke)"
-              strokeWidth="6"
-            />
-            <text x="108" y="40" fill="#e2e8f0" fontSize="20">
-              Orion flown path to current time
-            </text>
-
-            <line
-              x1="22"
-              y1="68"
-              x2="88"
-              y2="68"
-              stroke="url(#futureStroke)"
-              strokeWidth="5"
-              strokeDasharray="10 8"
-            />
-            <text x="108" y="74" fill="#e2e8f0" fontSize="20">
-              Orion future ephemeris
-            </text>
-
-            <line
-              x1="22"
-              y1="102"
-              x2="88"
-              y2="102"
-              stroke="rgba(229,231,235,0.55)"
-              strokeWidth="4"
-            />
-            <text x="108" y="108" fill="#e2e8f0" fontSize="20">
-              Moon path over same time window
-            </text>
-
-            <circle cx="55" cy="138" r="7" fill="#facc15" />
-            <text x="108" y="144" fill="#e2e8f0" fontSize="20">
-              Current Orion position
-            </text>
-
-            <image
-              href="/images/moon.svg"
-              x="41"
-              y="154"
-              width="28"
-              height="28"
-              opacity="0.95"
-            />
-            <text x="108" y="176" fill="#e2e8f0" fontSize="20">
-              Current Moon position
-            </text>
-
-            <image
-              href="/images/moon.svg"
-              x="41"
-              y="182"
-              width="28"
-              height="28"
-              opacity="0.38"
-            />
-            <text x="108" y="204" fill="#e2e8f0" fontSize="20">
-              Moon at closest approach
-            </text>
-          </g>
+          <text
+            x={VIEWBOX_WIDTH - 410}
+            y={58}
+            fill="#facc15"
+            fontSize="22"
+            fontFamily="sans-serif"
+            fontWeight="700"
+          >
+            EARTH ROUNDS: {earthRounds.toFixed(2)}
+          </text>
         </svg>
       </div>
     </div>

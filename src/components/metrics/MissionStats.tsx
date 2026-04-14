@@ -8,6 +8,7 @@ import {
 
 type MissionStatsProps = {
   metrics: MissionMetrics
+  replayProgressPercent?: number
 }
 
 function StatCard({
@@ -28,21 +29,29 @@ function StatCard({
   )
 }
 
-export default function MissionStats({ metrics }: MissionStatsProps) {
+export default function MissionStats({
+  metrics,
+  replayProgressPercent,
+}: MissionStatsProps) {
+  const progressPercent = Math.max(
+    0,
+    Math.min(100, replayProgressPercent ?? metrics.progressPercent)
+  )
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
         <div className="flex items-center justify-between">
           <p className="text-sm text-slate-400">Mission progress</p>
           <p className="text-lg font-semibold text-cyan-300">
-            {formatPercent(metrics.progressPercent)}
+            {formatPercent(progressPercent)}
           </p>
         </div>
 
         <div className="mt-3 h-3 overflow-hidden rounded-full bg-slate-800">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-teal-300 transition-all duration-700"
-            style={{ width: `${metrics.progressPercent}%` }}
+            className="h-full origin-left rounded-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-teal-300 will-change-transform"
+            style={{ transform: `scaleX(${progressPercent / 100})` }}
           />
         </div>
 
