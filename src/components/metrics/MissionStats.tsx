@@ -23,7 +23,9 @@ function StatCard({
   return (
     <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-4">
       <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-white">{value}</p>
+      <p className="mt-2 break-words text-xl font-semibold leading-tight text-white sm:text-2xl">
+        {value}
+      </p>
       <p className="mt-1 text-sm text-slate-500">{helper}</p>
     </div>
   )
@@ -59,7 +61,7 @@ export default function MissionStats({
           <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
             Current phase
           </p>
-          <p className="mt-2 text-2xl font-semibold text-white">
+          <p className="mt-2 break-words text-xl font-semibold text-white sm:text-2xl">
             {metrics.missionPhase}
           </p>
         </div>

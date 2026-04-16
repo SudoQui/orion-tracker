@@ -15,7 +15,7 @@ export default function SectionCard({
 }: SectionCardProps) {
   return (
     <section
-      className={`rounded-3xl border border-white/10 bg-slate-950/70 p-5 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-sm ${className}`}
+      className={`rounded-3xl border border-white/10 bg-slate-950/70 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-sm sm:p-5 ${className}`}
     >
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-white">{title}</h2>

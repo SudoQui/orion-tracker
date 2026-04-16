@@ -37,7 +37,7 @@ function ExternalPill({
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-slate-900/70 px-4 py-2 text-sm text-slate-200 transition hover:border-cyan-300/50 hover:bg-slate-900"
+      className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-slate-900/70 px-3 py-2 text-xs text-slate-200 transition hover:border-cyan-300/50 hover:bg-slate-900 sm:px-4 sm:text-sm"
     >
       <span className="text-cyan-300">{icon}</span>
       <span>{label}</span>
@@ -54,23 +54,23 @@ export default function Header({
   githubUrl,
 }: HeaderProps) {
   return (
-    <header className="rounded-3xl border border-cyan-400/10 bg-slate-950/80 px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.4)] backdrop-blur-sm">
+    <header className="rounded-3xl border border-cyan-400/10 bg-slate-950/80 px-4 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.4)] backdrop-blur-sm sm:px-5">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <img
             src="/images/logo.png"
             alt="Sudo Tech logo"
-            className="h-16 w-16 rounded-2xl border border-white/10 bg-slate-900/60 object-contain p-2 shadow-lg"
+            className="h-12 w-12 rounded-2xl border border-white/10 bg-slate-900/60 object-contain p-2 shadow-lg sm:h-16 sm:w-16"
             onError={(event) => {
               event.currentTarget.style.display = "none"
             }}
           />
 
           <div>
-            <p className="text-xs uppercase tracking-[0.35em] text-cyan-300">
+            <p className="text-[11px] uppercase tracking-[0.3em] text-cyan-300 sm:text-xs sm:tracking-[0.35em]">
               Powered by Sudo Tech
             </p>
-            <h1 className="mt-1 text-2xl font-bold text-white md:text-3xl">
+            <h1 className="mt-1 text-xl font-bold text-white sm:text-2xl md:text-3xl">
               {missionName}
             </h1>
             <p className="mt-1 text-sm text-slate-400">{vehicleName}</p>
@@ -91,11 +91,11 @@ export default function Header({
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span className="inline-flex items-center rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-300">
+          <div className="flex flex-wrap items-start gap-3 text-sm sm:items-center">
+            <span className="inline-flex items-center rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs leading-relaxed text-emerald-300 sm:text-sm">
               {statusLabel}
             </span>
-            <span className="text-slate-400">Last refresh: {updatedAt}</span>
+            <span className="text-xs text-slate-400 sm:text-sm">Last refresh: {updatedAt}</span>
           </div>
         </div>
       </div>

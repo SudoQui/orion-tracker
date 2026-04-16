@@ -234,20 +234,20 @@ export default function OrbitView({
 
   return (
     <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-950/80 shadow-[0_30px_90px_rgba(0,0,0,0.4)]">
-      <div className="flex flex-col gap-2 border-b border-white/10 px-5 py-4 md:flex-row md:items-end md:justify-between">
+      <div className="flex flex-col gap-2 border-b border-white/10 px-4 py-3 sm:px-5 sm:py-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-white">Mission map</h2>
-          <p className="mt-1 text-sm text-slate-400">
+          <h2 className="text-lg font-semibold text-white sm:text-xl">Mission map</h2>
+          <p className="mt-1 text-xs text-slate-400 sm:text-sm">
             Earth-centered inertial replay
           </p>
         </div>
 
-        <div className="text-sm text-slate-500">
+        <div className="text-xs text-slate-500 sm:text-sm">
           Current mission time: {formatTimestamp(currentTimestamp)}
         </div>
       </div>
 
-      <div className="p-2">
+      <div className="p-1.5 sm:p-2">
         <svg
           viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
           className="block h-auto w-full rounded-2xl bg-[#030712]"

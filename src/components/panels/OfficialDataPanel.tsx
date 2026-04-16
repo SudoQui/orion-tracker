@@ -10,9 +10,9 @@ type OfficialDataPanelProps = {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3">
+    <div className="flex flex-col gap-1 rounded-2xl border border-white/10 bg-slate-900/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <span className="text-sm text-slate-400">{label}</span>
-      <span className="text-sm font-medium text-white">{value}</span>
+      <span className="break-all text-sm font-medium text-white sm:text-right">{value}</span>
     </div>
   )
 }
@@ -60,7 +60,7 @@ export default function OfficialDataPanel({
             href={sourceMetadata.trajectorySourceUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-300 transition hover:border-cyan-300/50"
+            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-xs text-cyan-300 transition hover:border-cyan-300/50 sm:text-sm"
           >
             NASA AROW source
           </a>
@@ -69,7 +69,7 @@ export default function OfficialDataPanel({
             href={sourceMetadata.ephemerisZipUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-300 transition hover:border-cyan-300/50"
+            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-xs text-cyan-300 transition hover:border-cyan-300/50 sm:text-sm"
           >
             Artemis II ephemeris ZIP
           </a>
@@ -78,7 +78,7 @@ export default function OfficialDataPanel({
             href={sourceMetadata.moonSourceUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm text-cyan-300 transition hover:border-cyan-300/50"
+            className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-xs text-cyan-300 transition hover:border-cyan-300/50 sm:text-sm"
           >
             JPL Horizons
           </a>
@@ -98,7 +98,7 @@ export default function OfficialDataPanel({
         <p className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 text-sm leading-6 text-slate-400">
           Orion was shown as a path across many timestamps, while the Moon was shown only at
           its current position. That mixed a time history with a single instant. The map now
-          also shows the Moon’s path over the same time windows and a semi transparent Moon at
+          also shows the Moon&apos;s path over the same time windows and a semi transparent Moon at
           the historic closest approach location.
         </p>
 

@@ -511,8 +511,8 @@ export default function HomePage() {
 
   if (!displayData) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
-        <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-8 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 text-white sm:px-6">
+        <div className="rounded-3xl border border-white/10 bg-slate-950/70 px-6 py-6 text-center shadow-[0_20px_80px_rgba(0,0,0,0.4)] sm:px-8">
           <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-cyan-400/20 border-t-cyan-300" />
           <p className="mt-4 text-lg font-medium">
             Booting OrionTracker accuracy mode...
@@ -529,7 +529,7 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto max-w-[1850px] px-4 py-5 md:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1850px] px-3 py-4 sm:px-4 sm:py-5 md:px-6 lg:px-8">
         <Header
           missionName={displayData.config.missionName}
           vehicleName={displayData.config.vehicleName}
@@ -545,6 +545,19 @@ export default function HomePage() {
           </div>
         ) : null}
 
+        <div className="mt-6 space-y-6">
+          <StrobingMessage />
+
+          <OrbitView
+            actualTrajectory={displayData.actualPath}
+            futureTrajectory={displayData.futurePath}
+            moonActualPath={displayData.moonActualPath}
+            moonFuturePath={displayData.moonFuturePath}
+            currentMoonPosition={displayData.currentMoonPoint}
+            currentTimestamp={displayData.currentActualPoint.timestamp}
+          />
+        </div>
+
         <div className="mt-6 grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)_340px]">
           <SectionCard
             title="Mission metrics"
@@ -557,34 +570,22 @@ export default function HomePage() {
             />
           </SectionCard>
 
-          <div className="space-y-6">
-            <OrbitView
-              actualTrajectory={displayData.actualPath}
-              futureTrajectory={displayData.futurePath}
-              moonActualPath={displayData.moonActualPath}
-              moonFuturePath={displayData.moonFuturePath}
-              currentMoonPosition={displayData.currentMoonPoint}
-              currentTimestamp={displayData.currentActualPoint.timestamp}
+          <SectionCard
+            title="Official data status"
+            subtitle="Source provenance and time-consistent interpretation"
+          >
+            <OfficialDataPanel
+              sourceMetadata={safeSourceMetadata}
+              flownClosestApproachToMoon={displayData.flownClosestApproachToMoon}
+              futureSampleCount={displayData.futurePath.length}
             />
-
-            <SectionCard
-              title="Official data status"
-              subtitle="Source provenance and time-consistent interpretation"
-            >
-              <OfficialDataPanel
-                sourceMetadata={safeSourceMetadata}
-                flownClosestApproachToMoon={displayData.flownClosestApproachToMoon}
-                futureSampleCount={displayData.futurePath.length}
-              />
-            </SectionCard>
-          </div>
+          </SectionCard>
 
           <SectionCard
             title="Mission timeline"
             subtitle="Current event pinned to the top"
             className="h-fit"
           >
-            <StrobingMessage />
             <MissionTimeline
               events={displayData.config.timeline}
               currentTimestamp={displayData.currentActualPoint.timestamp}
